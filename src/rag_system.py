@@ -13,9 +13,11 @@ from langchain_core.documents import Document
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-import config
-from document_processor import DocumentProcessor
+import src.config as config
+from .document_processor import DocumentProcessor
 import multiprocessing
+from .utils.prompt_templates import PromptTemplates
+from src.vectorstore_manager import VectorstoreManager
 
 
 class RAGSystem:
@@ -28,11 +30,16 @@ class RAGSystem:
         self.vectorstore = None
         self.retriever = None
         self.qa_chain = None
+        self.prompt_templates = PromptTemplates()
         self.document_processor = DocumentProcessor()
+        self.vectorstore_manager = None
         
         # Initialize LLM and embeddings
         self._initialize_llm()
         self._initialize_embeddings()
+        
+        # Initialize VectorstoreManager
+        self.vectorstore_manager = VectorstoreManager(self.embeddings)
     
     def _initialize_llm(self):
         """Initialize the Ollama LLM (DeepSeek R1 8B) with GPU prioritized, CPU as fallback only."""
@@ -113,84 +120,25 @@ class RAGSystem:
             print(f"✅ Embeddings initialized: {config.EMBEDDING_MODEL} ({gpu_info})")
         except Exception as e:
             raise Exception(f"Failed to initialize embeddings: {str(e)}")
-    
-    def create_vectorstore(self, documents: List[Document], persist: bool = True):
-        """
-        Create or update vector store from documents with batch processing for GPU optimization.
         
-        Args:
-            documents: List of Document objects to add to vector store
-            persist: Whether to persist the vector store to disk
-        """
+    def process_documents(self, file_paths: List[str]):
+        """Process documents and create vector store"""
+        documents = self.document_processor.process_multiple_pdfs(file_paths)
         if not documents:
-            raise ValueError("No documents provided")
+            raise ValueError("No documents were successfully processed")
         
-        try:
-            # Batch process documents for better GPU/CPU utilization
-            # Process in batches to maximize resource usage
-            batch_size = getattr(config, 'EMBEDDING_BATCH_SIZE', 200)
-            
-            # Create vector store
-            if persist and os.path.exists(config.PERSIST_DIRECTORY):
-                # Load existing vector store
-                self.vectorstore = Chroma(
-                    persist_directory=config.PERSIST_DIRECTORY,
-                    embedding_function=self.embeddings,
-                )
-                # Add documents in batches for GPU optimization
-                if len(documents) > batch_size:
-                    for i in range(0, len(documents), batch_size):
-                        batch = documents[i:i + batch_size]
-                        self.vectorstore.add_documents(batch)
-                        print(f"Processed batch {i//batch_size + 1}/{(len(documents) + batch_size - 1)//batch_size} ({len(batch)} chunks)")
-                else:
-                    self.vectorstore.add_documents(documents)
-            else:
-                # Create new vector store with batch processing
-                # Chroma.from_documents handles batching internally, but we can optimize
-                self.vectorstore = Chroma.from_documents(
-                    documents=documents,
-                    embedding=self.embeddings,
-                    persist_directory=config.PERSIST_DIRECTORY if persist else None,
-                )
-            
-            # Create retriever
-            self.retriever = self.vectorstore.as_retriever(
-                search_kwargs={"k": config.TOP_K}
-            )
-            
-            # Create QA chain
-            self._create_qa_chain()
-            
-            print(f"Vector store created with {len(documents)} document chunks (GPU optimized)")
-            
-        except Exception as e:
-            raise Exception(f"Failed to create vector store: {str(e)}")
+        # Build or update the vector store
+        self.vectorstore_manager.create_vectorstore(documents, persist=True)
+        # Sync local handles
+        self.vectorstore = self.vectorstore_manager.vectorstore
+        self.retriever = self.vectorstore_manager.retriever
+        # Create QA chain now that retriever is ready
+        self._create_qa_chain()
     
     def _create_qa_chain(self):
         """Create the QA chain using LCEL (LangChain Expression Language)."""
         # Business-friendly prompt - personalized, clear, no technical jargon with context awareness
-        prompt_template = """You are a helpful business assistant helping sales, marketing, and office teams. Answer questions naturally and conversationally.
-
-Information from documents:
-{context}
-
-Previous conversation (if any):
-{{conversation_context}}
-
-Current question: {question}
-
-Answer guidelines:
-- Use clear, everyday business language - no technical terms
-- Be conversational and friendly, like talking to a colleague
-- Keep answers concise but complete (2-3 sentences when possible)
-- Focus on what matters for business decisions
-- Never mention code, file paths, or technical details
-- IMPORTANT: Only use information from the provided context documents above
-- If the information isn't in the documents, say "I don't have that information in the documents" - do NOT make up or guess information
-- If this is a follow-up question, reference the previous conversation naturally
-
-Provide a helpful, personalized answer based ONLY on the document context:"""
+        prompt_template = self.prompt_templates.qa_prompt_template()
 
         prompt = PromptTemplate(
             template=prompt_template,
@@ -256,39 +204,7 @@ Provide a helpful, personalized answer based ONLY on the document context:"""
             # Build personalized prompt for multiple response suggestions
             client_greeting = f"Dear {client_name}," if client_name else "Hello,"
             
-            suggestions_prompt_template = f"""You are a customer service representative helping clients with inquiries. Generate {num_suggestions} different response options that are friendly, accommodating, heartfelt, empathizing, professional, and personalized.
-
-Client Information:
-- Client Name: {client_name if client_name else 'Not provided'}
-- Inquiry: {{question}}
-
-Information from company documents:
-{{context}}
-
-{conv_context_text}
-
-Response Guidelines:
-- Address the client by name if provided: {client_greeting}
-- Be warm, empathetic, and understanding
-- Show genuine care and concern for their situation
-- Use natural, conversational language - NOT generic or AI-sounding
-- IMPORTANT: If the inquiry contains multiple questions, make sure to answer ALL questions comprehensively
-- When multiple questions are present, organize your response to address each question clearly
-- Each response should have a slightly different tone or approach:
-  * Response 1: More empathetic and understanding
-  * Response 2: More solution-focused and action-oriented
-  * Response 3+: Vary between warm, professional, or solution-oriented
-- Personalize based on their specific inquiry
-- Only use information from the provided documents - if information isn't available, acknowledge it gracefully
-- Keep responses concise but complete (3-4 sentences for single questions, 5-7 sentences for multiple questions)
-- Make each response feel human-written and unique
-
-Generate {num_suggestions} different response options, each numbered clearly (Response 1, Response 2, etc.). Each should be complete and ready to send to the client.
-
-Format your response as:
-Response 1: [first response option]
-Response 2: [second response option]
-[Add more if num_suggestions > 2]"""
+            suggestions_prompt_template = self.prompt_templates.suggestion_prompt_template(num_suggestions, client_name, conv_context_text, client_greeting)
             
             # Build the full prompt
             full_prompt = suggestions_prompt_template.format(
@@ -432,26 +348,7 @@ Response 2: [second response option]
                 enhanced_question = question
             
             # Create prompt with context awareness
-            context_prompt_template = """You are a helpful business assistant helping sales, marketing, and office teams. Answer questions naturally and conversationally.
-
-Information from documents:
-{context}
-
-{conversation_context}
-
-Question: {question}
-
-Answer guidelines:
-- Use clear, everyday business language - no technical terms
-- Be conversational and friendly, like talking to a colleague
-- Keep answers concise but complete (2-3 sentences when possible)
-- Focus on what matters for business decisions
-- Never mention code, file paths, or technical details
-- CRITICAL: Only use information from the provided context documents above
-- If the information isn't in the documents, say "I don't have that information in the documents" - do NOT make up or guess information
-- If this is a follow-up question, reference the previous conversation naturally
-
-Provide a helpful, personalized answer based ONLY on the document context:"""
+            context_prompt_template = self.prompt_templates.context_prompt_template()
             
             # Format conversation context for prompt
             conv_context_text = f"Previous conversation:\n{conversation_context}\n" if conversation_context else ""
@@ -501,59 +398,15 @@ Provide a helpful, personalized answer based ONLY on the document context:"""
     
     def load_vectorstore(self):
         """Load existing vector store from disk."""
-        try:
-            if os.path.exists(config.PERSIST_DIRECTORY):
-                self.vectorstore = Chroma(
-                    persist_directory=config.PERSIST_DIRECTORY,
-                    embedding_function=self.embeddings,
-                )
-                self.retriever = self.vectorstore.as_retriever(
-                    search_kwargs={"k": config.TOP_K}
-                )
-                self._create_qa_chain()
-                print("Vector store loaded from disk")
-                return True
-            else:
-                print("No existing vector store found")
-                return False
-        except Exception as e:
-            print(f"Error loading vector store: {str(e)}")
-            return False
-    
-    def process_documents(self, file_paths: List[str]):
-        """
-        Process documents and create vector store.
+        loaded = self.vectorstore_manager.load_vectorstore()
+        # Sync local handles from manager
+        self.vectorstore = self.vectorstore_manager.vectorstore
+        self.retriever = self.vectorstore_manager.retriever
+        if loaded and self.vectorstore and self.retriever:
+            self._create_qa_chain()
+            return True
+        return False
         
-        Args:
-            file_paths: List of PDF file paths
-        """
-        # Process documents
-        documents = self.document_processor.process_multiple_pdfs(file_paths)
-        
-        if not documents:
-            raise ValueError("No documents were successfully processed")
-        
-        # Create vector store
-        self.create_vectorstore(documents, persist=True)
-    
     def get_vectorstore_info(self) -> Dict[str, any]:
         """Get information about the current vector store."""
-        if not self.vectorstore:
-            return {"status": "not_initialized"}
-        
-        try:
-            # Get collection count
-            collection = self.vectorstore._collection
-            count = collection.count() if collection else 0
-            
-            return {
-                "status": "initialized",
-                "document_count": count,
-                "persist_directory": config.PERSIST_DIRECTORY if os.path.exists(config.PERSIST_DIRECTORY) else None,
-            }
-        except Exception as e:
-            return {
-                "status": "error",
-                "error": str(e)
-            }
-
+        return self.vectorstore_manager.get_vectorstore_info()

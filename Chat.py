@@ -7,17 +7,17 @@ import tempfile
 import uuid
 import multiprocessing
 from pathlib import Path
-from rag_system import RAGSystem
-from document_processor import DocumentProcessor
-from conversation_manager import ConversationManager
+from src.rag_system import RAGSystem
+from src.document_processor import DocumentProcessor
+from src.conversation_manager import ConversationManager
 from PIL import Image
-import config
+import src.config as config
 
 # Set environment variable to avoid OpenMP warning (needed for EasyOCR/numpy)
 os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
 
 # Import image processor after setting environment variable
-from image_processor import ImageProcessor
+from src.image_processor import ImageProcessor
 
 # Try multimodal component first (supports Ctrl+V paste), fallback to native Streamlit
 try:
@@ -121,45 +121,20 @@ def process_uploaded_files(uploaded_files):
         st.error(f"Error processing documents: {str(e)}")
         return False
 
-
 def main():
     """Main application function."""
+    st.set_page_config(page_title="Business Knowledge Assistant", page_icon="💼")
     st.title("💼 Business Knowledge Assistant")
     st.markdown("**Get instant answers from your company documents**")
+    rag = initialize_rag_system()
     
     # Sidebar
     with st.sidebar:
-        st.header("⚙️ Configuration")
-        
-        # Model info
-        st.subheader("Model Information")
-        st.info(f"**LLM:** {config.OLLAMA_MODEL}\n**Embeddings:** {config.EMBEDDING_MODEL}\n**API:** {config.OLLAMA_BASE_URL}")
-        
-        # System status
-        st.subheader("System Status")
         rag = initialize_rag_system()
-        if rag:
-            vs_info = rag.get_vectorstore_info()
-            if vs_info["status"] == "initialized":
-                st.success(f"✅ Vector Store: {vs_info['document_count']} chunks")
-            else:
-                st.warning("⚠️ No documents loaded")
-        else:
-            st.error("❌ RAG System not initialized")
-        
-        # Settings
-        st.subheader("Settings")
-        st.info(f"**Chunk Size:** {config.CHUNK_SIZE}\n**Top-K:** {config.TOP_K}\n**Max Tokens:** {config.MAX_TOKENS}\n**Temperature:** {config.TEMPERATURE}")
-        
-        # Performance Settings
-        st.subheader("Performance")
-        cpu_count = multiprocessing.cpu_count()
-        st.info(f"**CPU Cores:** {cpu_count}\n**Parallel Processing:** {'Enabled' if config.PARALLEL_PROCESSING else 'Disabled'}\n**Workers:** {config.MAX_WORKERS if config.MAX_WORKERS > 0 else cpu_count}\n**Batch Size:** {config.BATCH_SIZE}\n**Context Size:** {config.CONTEXT_SIZE}")
-        
-        # Cache settings
-        st.subheader("Memory & Cache")
-        st.session_state.use_cache = st.checkbox("Enable Answer Caching", value=st.session_state.use_cache, help="Cache similar questions for faster responses")
-        
+        if st.button("🆕 New Thread", use_container_width=True):
+                st.session_state.current_thread_id = st.session_state.conversation_manager.create_conversation_thread()
+                st.session_state.messages = []
+                st.rerun()
         # Conversation threads
         st.subheader("Conversation Threads")
         threads = st.session_state.conversation_manager.get_all_threads()
@@ -196,6 +171,7 @@ def main():
                             {"role": msg["role"], "content": msg["content"], "sources": msg.get("sources", [])}
                             for msg in thread_messages
                         ]
+                        
                         st.rerun()
         else:
             st.caption("No previous threads")
@@ -264,11 +240,6 @@ def main():
                 st.caption(f"💬 Thread: {thread_topic}")
             else:
                 st.caption("💬 Thread: New conversation")
-        with col2:
-            if st.button("🆕 New Thread", use_container_width=True):
-                st.session_state.current_thread_id = st.session_state.conversation_manager.create_conversation_thread()
-                st.session_state.messages = []
-                st.rerun()
         
         # Display chat messages
         for message in st.session_state.messages:
@@ -486,7 +457,7 @@ def main():
                         st.markdown("---")
                         img_col1, img_col2 = st.columns([2, 3])
                         with img_col1:
-                            st.image(image, caption="📷 Pasted/Uploaded Image", use_container_width=True)
+                            st.image(image, caption="📷 Pasted/Uploaded Image", width=True)
                         
                         with img_col2:
                             # Process image

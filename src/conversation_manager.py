@@ -6,7 +6,7 @@ import os
 import hashlib
 from typing import Dict, List, Optional
 from datetime import datetime
-import config
+import src.config as config
 
 
 class ConversationManager:

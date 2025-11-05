@@ -6,7 +6,7 @@ import pdfplumber
 from typing import List, Dict, Optional
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
-import config
+import src.config as config
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing
 
