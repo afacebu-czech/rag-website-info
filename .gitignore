@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Vector Store
+vectorstore/
+*.db
+*.sqlite
+
+# Cache and Conversation History
+cache/
+*.json
+!requirements.txt
+
+# Uploaded Documents
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Environment Variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
+
+# Logs
+*.log
+

@@ -1,0 +1,31 @@
+# Core RAG and LLM Integration
+langchain>=1.0.3
+langchain-community>=0.4.1
+langchain-ollama>=1.0.0
+
+# PDF Processing
+pdfplumber>=0.11.7
+pypdf>=6.1.3
+
+# Text Chunking
+semantic-chunkers>=0.1.1
+
+# Web Framework
+streamlit>=1.45.1
+
+# Utilities
+python-dotenv>=1.2.1
+
+# Vector Store (via LangChain)
+chromadb>=0.4.0
+langchain-chroma>=1.0.0
+
+# Image Processing & OCR
+Pillow>=10.0.0
+numpy>=1.24.0
+easyocr>=1.7.0
+# Alternative: pytesseract>=0.3.10 (requires Tesseract-OCR binary)
+
+# Multimodal Chat Input (supports image paste in chat box)
+st-chat-input-multimodal>=0.1.0
+
