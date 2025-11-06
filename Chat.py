@@ -12,6 +12,7 @@ from src.document_processor import DocumentProcessor
 from src.conversation_manager import ConversationManager
 from PIL import Image
 import src.config as config
+from src.session_management import SessionManager
 
 # Set environment variable to avoid OpenMP warning (needed for EasyOCR/numpy)
 os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
@@ -35,38 +36,18 @@ st.set_page_config(
 )
 
 # Initialize session state
-if "rag_system" not in st.session_state:
-    st.session_state.rag_system = None
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "documents_processed" not in st.session_state:
-    st.session_state.documents_processed = False
-if "conversation_manager" not in st.session_state:
-    st.session_state.conversation_manager = ConversationManager()
-if "current_thread_id" not in st.session_state:
-    st.session_state.current_thread_id = None
-if "use_cache" not in st.session_state:
-    st.session_state.use_cache = True
-if "image_processor" not in st.session_state:
-    try:
-        st.session_state.image_processor = ImageProcessor()
-    except Exception as e:
-        st.session_state.image_processor = None
-if "pasted_image" not in st.session_state:
-    st.session_state.pasted_image = False
-if "regenerate_response" not in st.session_state:
-    st.session_state.regenerate_response = False
-
+session_manager = SessionManager()
+session_manager._initialize_sessions()
 
 def initialize_rag_system():
     """Initialize the RAG system."""
     try:
-        if st.session_state.rag_system is None:
+        if session_manager.get("rag_system") is None:
             with st.spinner("Initializing RAG system..."):
-                st.session_state.rag_system = RAGSystem()
+                session_manager.set("rag_system", RAGSystem()) 
                 # Try to load existing vector store
-                st.session_state.rag_system.load_vectorstore()
-        return st.session_state.rag_system
+                session_manager.get("rag_system").load_vectorstore()
+        return session_manager.get("rag_system")
     except Exception as e:
         st.error(f"Failed to initialize RAG system: {str(e)}")
         st.info("Make sure Ollama is running and DeepSeek R1 8B model is available.")
@@ -108,7 +89,7 @@ def process_uploaded_files(uploaded_files):
         # Process documents
         with st.spinner(f"Processing {len(temp_files)} document(s)..."):
             rag.process_documents(temp_files)
-            st.session_state.documents_processed = True
+            session_manager.set("documents_processed", True)
         
         # Clean up temp files (optional - you might want to keep them)
         # for temp_file in temp_files:
@@ -132,12 +113,12 @@ def main():
     with st.sidebar:
         rag = initialize_rag_system()
         if st.button("🆕 New Thread", use_container_width=True):
-                st.session_state.current_thread_id = st.session_state.conversation_manager.create_conversation_thread()
-                st.session_state.messages = []
+                session_manager.set("current_thread_id", session_manager.get("conversation_manager").create_conversation_thread())
+                session_manager.set("messages", [])
                 st.rerun()
         # Conversation threads
         st.subheader("Conversation Threads")
-        threads = st.session_state.conversation_manager.get_all_threads()
+        threads = session_manager.get("conversation_manager").get_all_threads()
         if threads:
             # Handle None topic values
             thread_options = {}
@@ -150,10 +131,10 @@ def main():
             if thread_options:
                 # Find current index
                 current_index = 0
-                if st.session_state.current_thread_id:
+                if session_manager.get("current_thread_id"):
                     current_values = list(thread_options.values())
-                    if st.session_state.current_thread_id in current_values:
-                        current_index = current_values.index(st.session_state.current_thread_id)
+                    if session_manager.get("current_thread_id") in current_values:
+                        current_index = current_values.index(session_manager.get("current_thread_id"))
                 
                 selected_thread = st.selectbox(
                     "Switch to thread:",
@@ -163,22 +144,22 @@ def main():
                 )
                 if selected_thread:
                     selected_id = thread_options[selected_thread]
-                    if selected_id != st.session_state.current_thread_id:
-                        st.session_state.current_thread_id = selected_id
+                    if selected_id != session_manager.get("current_thread_id"):
+                        session_manager.set("current_thread_id", selected_id)
                         # Load thread messages
-                        thread_messages = st.session_state.conversation_manager.get_thread_history(selected_id)
-                        st.session_state.messages = [
+                        thread_messages = session_manager.get("conversation_manager").get_thread_history(selected_id)
+                        message_dict = [
                             {"role": msg["role"], "content": msg["content"], "sources": msg.get("sources", [])}
                             for msg in thread_messages
                         ]
-                        
+                        session_manager.set("messages", message_dict)
                         st.rerun()
         else:
             st.caption("No previous threads")
         
         # Clear current conversation
         if st.button("🗑️ Clear Current Conversation"):
-            st.session_state.messages = []
+            session_manager.set("messages", [])
             st.rerun()
     
     # Main content area
@@ -207,7 +188,7 @@ def main():
                     st.error("❌ Failed to process documents")
         
         # Show processed documents
-        if st.session_state.documents_processed:
+        if session_manager.get("documents_processed"):
             st.success("✅ Documents are ready for querying!")
     
     # Tab 2: Chat Interface
@@ -216,7 +197,7 @@ def main():
         st.caption("Get quick, clear answers from your uploaded documents")
         
         # Check if documents are processed
-        if not st.session_state.documents_processed:
+        if not session_manager.get("documents_processed"):
             rag = initialize_rag_system()
             if rag:
                 vs_info = rag.get_vectorstore_info()
@@ -227,12 +208,12 @@ def main():
         # Thread management UI
         col1, col2 = st.columns([3, 1])
         with col1:
-            if st.session_state.current_thread_id:
+            if session_manager.get("current_thread_id"):
                 # Get thread topic for display
-                threads = st.session_state.conversation_manager.get_all_threads()
+                threads = session_manager.get("conversation_manager").get_all_threads()
                 thread_topic = "Current conversation"
                 for t in threads:
-                    if t['thread_id'] == st.session_state.current_thread_id:
+                    if t['thread_id'] == session_manager.get("current_thread_id"):
                         thread_topic = t.get('topic', 'Current conversation')
                         if len(thread_topic) > 40:
                             thread_topic = thread_topic[:40] + "..."
@@ -242,7 +223,7 @@ def main():
                 st.caption("💬 Thread: New conversation")
         
         # Display chat messages
-        for message in st.session_state.messages:
+        for message in session_manager.get("messages"):
             with st.chat_message(message["role"]):
                 # Show cached indicator if applicable
                 if message.get("cached"):
@@ -277,6 +258,7 @@ def main():
             
             # Process multimodal input - returns Dict[str, Any] with keys: 'text', 'image', 'audio'
             if user_input:
+                session_manager.start_processing()
                 # Handle different return formats from multimodal_chat_input
                 if isinstance(user_input, dict):
                     # Check for image first (pasted or uploaded)
@@ -291,7 +273,7 @@ def main():
                     # Just pass it through - the image processing code will extract the actual data
                     if image_data:
                         uploaded_image = image_data
-                        st.session_state.pasted_image = True
+                        session_manager.set("pasted_image", True)
                         # Also check if there's text with the image
                         if user_input.get("text"):
                             prompt = user_input["text"].strip()
@@ -300,47 +282,55 @@ def main():
                     elif user_input.get("text"):
                         # Text only
                         prompt = user_input["text"].strip()
-                        st.session_state.pasted_image = False
+                        session_manager.set("pasted_image", False)
                     elif user_input.get("message"):
                         # Text only (alternative key)
                         prompt = user_input["message"].strip()
-                        st.session_state.pasted_image = False
+                        session_manager.set("pasted_image", False)
                 elif isinstance(user_input, str):
                     # String input (fallback)
                     prompt = user_input.strip()
-                    st.session_state.pasted_image = False
+                    session_manager.set("pasted_image", False)
         else:
             # Fallback: Use native Streamlit chat_input with file attachment
             # Note: Native version may require clicking attachment button, not direct Ctrl+V
             try:
-                user_input = st.chat_input(
-                    "💬 Type a message or attach an image...",
-                    key="main_chat_input",
-                    accept_file=True,
-                    file_type=["png", "jpg", "jpeg", "gif", "bmp"]
-                )
+                if not session_manager.get("is_processing"):
+                    user_input = st.chat_input(
+                        "💬 Type a message or attach an image...",
+                        key="main_chat_input",
+                        accept_file=True,
+                        file_type=["png", "jpg", "jpeg", "gif", "bmp"]
+                    )
+                else:
+                    st.chat_input("Processing...", key="disabled_input", disabled=True)
+                    user_input = None
                 
                 if user_input:
                     # Check if it's a ChatInput object with files (Streamlit 1.43.0+)
                     if hasattr(user_input, 'files') and user_input.files:
                         # Image was attached
                         uploaded_image = user_input.files[0]
-                        st.session_state.pasted_image = True
+                        session_manager.set("pasted_image", True)
                         if hasattr(user_input, 'text') and user_input.text:
                             prompt = user_input.text
                     elif hasattr(user_input, 'text') and user_input.text:
                         # Text only
                         prompt = user_input.text
-                        st.session_state.pasted_image = False
+                        session_manager.set("pasted_image", False)
                     elif isinstance(user_input, str):
                         # String input
                         prompt = user_input
-                        st.session_state.pasted_image = False
+                        session_manager.set("pasted_image", False)
             except TypeError:
                 # Older Streamlit version - use regular chat_input with separate uploader
                 col1, col2 = st.columns([5, 1])
                 with col1:
-                    prompt = st.chat_input("💬 Ask a question...", key="main_chat_input")
+                    if not session_manager.get("is_processing"):
+                        prompt = st.chat_input("💬 Ask a question...", key="main_chat_input")
+                    else:
+                        st.chat_input("Processing...", key="disabled_input", disabled=True)
+                        user_input = None
                 with col2:
                     uploaded_image = st.file_uploader(
                         "📷",
@@ -353,11 +343,11 @@ def main():
         # Process image if pasted/uploaded (handles both paste and upload)
         if uploaded_image is not None:
             # Clear any previous image processing state
-            if "pending_inquiry" in st.session_state and "image" in st.session_state.pending_inquiry:
+            if "pending_inquiry" in session_manager.get_session_snapshot() and "image" in session_manager.get("pending_inquiry"):
                 # Only clear if it's a different image
                 pass
             
-            if st.session_state.image_processor:
+            if session_manager.get("image_processor"):
                 # Handle different image input types
                 try:
                     import io
@@ -499,16 +489,18 @@ def main():
                                         st.warning("⚠️ No clear inquiry detected. Using full extracted text as inquiry.")
                                     else:
                                         st.error("❌ Could not extract a valid inquiry from the image. Please ensure the text is clear and readable.")
+                                        session_manager.stop_processing()
                                         st.stop()
                                         return
                                 
                                 # Add to session state for processing
-                                st.session_state.pending_inquiry = {
+                                pending_inquiry_dict = {
                                     "prompt": prompt.strip(),
                                     "client_name": client_name,
                                     "image": image,
                                     "extracted_text": result["extracted_text"]
                                 }
+                                session_manager.set("pending_inquiry", pending_inquiry_dict)
                                 
                                 st.balloons()  # Celebration for successful processing!
                                 st.success("🚀 Ready to generate response suggestions! Processing automatically...")
@@ -525,12 +517,12 @@ def main():
                 st.error("⚠️ Image processing not available. Please install OCR dependencies: `pip install easyocr pillow`")
         
         # Process text prompt or pending inquiry
-        if prompt or st.session_state.get("pending_inquiry"):
+        if prompt or session_manager.get("pending_inquiry"):
             # Handle pending inquiry from image
             client_name = None
             image_processed = False
-            if st.session_state.get("pending_inquiry"):
-                inquiry_data = st.session_state.pending_inquiry
+            if session_manager.get("pending_inquiry"):
+                inquiry_data = session_manager.get("pending_inquiry")
                 prompt = inquiry_data.get("prompt", "").strip()
                 client_name = inquiry_data.get("client_name")
                 extracted_text = inquiry_data.get("extracted_text", "").strip()
@@ -547,20 +539,22 @@ def main():
                     else:
                         st.error("❌ Could not extract a valid inquiry from the image.")
                         st.stop()
+                        session_manager.stop_processing()
                         return
                 
                 # Clear pending inquiry
-                del st.session_state.pending_inquiry
+                session_manager.clear("pending_inquiry")
             
             # Ensure we have a prompt
             if not prompt or len(prompt.strip()) < 3:
                 st.warning("⚠️ No valid question found. Please try again.")
                 st.stop()
+                session_manager.stop_processing()
                 return
             
             # Initialize or get current thread
-            if not st.session_state.current_thread_id:
-                st.session_state.current_thread_id = st.session_state.conversation_manager.create_conversation_thread()
+            if not session_manager.get("current_thread_id"):
+                session_manager.set("current_thread_id", session_manager.get("conversation_manager").create_conversation_thread())
             
             # Format user message with client name if available
             user_message = prompt
@@ -568,8 +562,8 @@ def main():
                 user_message = f"Client: {client_name}\n\nInquiry: {prompt}"
             
             # Add user message to thread
-            st.session_state.conversation_manager.add_message(
-                st.session_state.current_thread_id,
+            session_manager.get("conversation_manager").add_message(
+                session_manager.get("current_thread_id"),
                 "user",
                 user_message
             )
@@ -578,7 +572,7 @@ def main():
             display_message = prompt
             if client_name:
                 display_message = f"**{client_name}** asks: {prompt}"
-            st.session_state.messages.append({"role": "user", "content": display_message})
+            session_manager.get("messages").append({"role": "user", "content": display_message})
             
             # Display user message
             with st.chat_message("user"):
@@ -597,16 +591,16 @@ def main():
                                 st.caption(f"Processing inquiry: {prompt[:100]}...")
                             
                             # Check if regeneration was requested (bypass cache)
-                            regenerate_requested = st.session_state.get("regenerate_response", False)
+                            regenerate_requested = session_manager.get("regenerate_response", False)
                             if regenerate_requested:
                                 # Clear the regeneration flag
-                                st.session_state.regenerate_response = False
+                                session_manager.set("regenerate_response", False)
                                 st.info("🔄 Regenerating fresh response (bypassing cache)...")
                             
                             # Check cache first if enabled (but skip if regeneration requested)
                             cached_result = None
-                            if st.session_state.use_cache and not regenerate_requested:
-                                cached_result = st.session_state.conversation_manager.find_similar_question(prompt)
+                            if session_manager.get("use_cache") and not regenerate_requested:
+                                cached_result = session_manager.get("conversation_manager").find_similar_question(prompt)
                                 if cached_result and cached_result.get("similarity", 0) >= 0.9:
                                     st.info("💾 Using cached answer (similar question found)")
                                     # Show option to regenerate even if cached
@@ -623,10 +617,10 @@ def main():
                                     }
                                 else:
                                     # Get conversation context
-                                    conversation_context = st.session_state.conversation_manager.get_thread_context(
-                                        st.session_state.current_thread_id
+                                    conversation_context = session_manager.get("conversation_manager").get_thread_context(
+                                        session_manager.get("current_thread_id")
                                     )
-                                    
+
                                     # Generate multiple response suggestions
                                     num_suggestions = 2  # Default to 2, can be configured
                                     
@@ -657,7 +651,7 @@ def main():
                                                 raise Exception("Could not generate any response")
                                         
                                         # Cache the answer
-                                        st.session_state.conversation_manager.cache_answer(
+                                        session_manager.get("conversation_manager").cache_answer(
                                             prompt,
                                             result["suggestions"][0] if result["suggestions"] else result.get("answer", ""),
                                             result["source_documents"]
@@ -678,12 +672,13 @@ def main():
                                                 raise Exception("Fallback also failed")
                                         except Exception as e2:
                                             st.error(f"❌ Fallback also failed: {str(e2)}")
+                                            session_manager.stop_processing()
                                             st.stop()
                                             return
                             else:
                                 # Get conversation context
-                                conversation_context = st.session_state.conversation_manager.get_thread_context(
-                                    st.session_state.current_thread_id
+                                conversation_context = session_manager.get("conversation_manager").get_thread_context(
+                                    session_manager.get("current_thread_id")
                                 )
                                 
                                 # Generate multiple response suggestions
@@ -731,6 +726,7 @@ def main():
                                             raise Exception("Fallback also failed")
                                     except Exception as e2:
                                         st.error(f"❌ Fallback also failed: {str(e2)}")
+                                        session_manager.stop_processing()
                                         st.stop()
                                         return
                             
@@ -747,8 +743,8 @@ def main():
                                 # Try fallback to regular query
                                 try:
                                     st.info("🔄 Trying fallback response generation...")
-                                    conversation_context = st.session_state.conversation_manager.get_thread_context(
-                                        st.session_state.current_thread_id
+                                    conversation_context = session_manager.get("conversation_manager").get_thread_context(
+                                        session_manager.get("current_thread_id")
                                     )
                                     fallback_result = rag.query(prompt, conversation_context=conversation_context)
                                     if fallback_result.get("answer"):
@@ -756,13 +752,13 @@ def main():
                                         st.markdown(fallback_result["answer"])
                                         
                                         # Add to conversation
-                                        st.session_state.conversation_manager.add_message(
-                                            st.session_state.current_thread_id,
+                                        session_manager.get("conversation_manager").add_message(
+                                            session_manager.get("current_thread_id"),
                                             "assistant",
                                             fallback_result["answer"],
                                             sources=fallback_result.get("source_documents", [])
                                         )
-                                        st.session_state.messages.append({
+                                        session_manager.get("messages").append({
                                             "role": "assistant",
                                             "content": fallback_result["answer"],
                                             "sources": fallback_result.get("source_documents", [])
@@ -771,6 +767,7 @@ def main():
                                         st.error("❌ Could not generate a response. Please check your documents and try again.")
                                 except Exception as e:
                                     st.error(f"❌ Error generating response: {str(e)}")
+                                session_manager.stop_processing()
                                 st.stop()
                                 return
                             
@@ -785,18 +782,18 @@ def main():
                                     st.caption("Choose a response to send to the client:")
                             with regen_col2:
                                 if st.button("🔄 Regenerate", key="regenerate_top", use_container_width=True, help="Generate new response variations"):
-                                    st.session_state.regenerate_response = True
+                                    session_manager.set("regenerate_response", True)
                                     st.rerun()
                             
                             selected_response = None
                             
                             # Store suggestions in session state for selection
-                            st.session_state.current_suggestions = {
+                            session_manager.set("current_suggestions", {
                                 "suggestions": suggestions,
                                 "sources": result["source_documents"],
                                 "client_name": client_name,
                                 "inquiry": prompt
-                            }
+                            })
                             
                             # Display each suggestion with a select button
                             for idx, suggestion in enumerate(suggestions, 1):
@@ -806,9 +803,9 @@ def main():
                                         st.markdown(f"**Option {idx}:**")
                                         st.markdown(suggestion)
                                     with col2:
-                                        if st.button("📋 Use This", key=f"select_{idx}_{len(st.session_state.messages)}", use_container_width=True):
-                                            st.session_state.selected_response_idx = idx
-                                            st.session_state.selected_response = suggestion
+                                        if st.button("📋 Use This", key=f"select_{idx}_{len(session_manager.get("messages"))}", use_container_width=True):
+                                            session_manager.set("selected_response_idx", idx)
+                                            session_manager.set("selected_response", suggestion)
                                             st.rerun()
                                     
                                     if idx < len(suggestions):
@@ -819,26 +816,26 @@ def main():
                             regen_bottom_col1, regen_bottom_col2, regen_bottom_col3 = st.columns([2, 1, 1])
                             with regen_bottom_col2:
                                 if st.button("🔄 Regenerate All", key="regenerate_bottom", use_container_width=True, help="Generate completely new response variations (bypasses cache)"):
-                                    st.session_state.regenerate_response = True
+                                    session_manager.set("regenerate_response", True)
                                     st.rerun()
                             
                             # Check if a response was selected (from previous interaction)
-                            if st.session_state.get("selected_response") and st.session_state.get("selected_response_idx"):
-                                selected_response = st.session_state.selected_response
-                                selected_idx = st.session_state.selected_response_idx
+                            if session_manager.get("selected_response") and session_manager.get("selected_response_idx"):
+                                selected_response = session_manager.get("selected_response")
+                                selected_idx = session_manager.get("selected_response_idx")
                                 
                                 # Get stored suggestions data
-                                stored_data = st.session_state.get("current_suggestions", {})
+                                stored_data = session_manager.get("current_suggestions", {})
                                 
                                 # Add selected response to conversation
-                                st.session_state.conversation_manager.add_message(
-                                    st.session_state.current_thread_id,
+                                session_manager.get("conversation_manager").add_message(
+                                    session_manager.get("current_thread_id"),
                                     "assistant",
                                     selected_response,
                                     sources=stored_data.get("sources", result["source_documents"])
                                 )
                                 
-                                st.session_state.messages.append({
+                                session_manager.get("messages").append({
                                     "role": "assistant",
                                     "content": f"**Selected Response {selected_idx}:**\n\n{selected_response}",
                                     "sources": stored_data.get("sources", result["source_documents"]),
@@ -847,10 +844,10 @@ def main():
                                 })
                                 
                                 # Clear selection state
-                                del st.session_state.selected_response
-                                del st.session_state.selected_response_idx
-                                if "current_suggestions" in st.session_state:
-                                    del st.session_state.current_suggestions
+                                session_manager.clear("selected_response")
+                                session_manager.clear("selected_response_idx")
+                                if "current_suggestions" in session_manager.get_session_snapshot():
+                                    session_manager.clear("current_suggestions")
                                 
                                 st.success(f"✅ Response {selected_idx} selected and saved!")
                                 st.rerun()
@@ -872,27 +869,27 @@ def main():
                             st.error(error_msg)
                             # Fallback to regular query
                             try:
-                                conversation_context = st.session_state.conversation_manager.get_thread_context(
-                                    st.session_state.current_thread_id
+                                conversation_context = session_manager.get("conversation_manager").get_thread_context(
+                                    session_manager.get("current_thread_id")
                                 )
                                 result = rag.query(prompt, conversation_context=conversation_context)
                                 st.markdown(result["answer"])
                                 
-                                st.session_state.conversation_manager.add_message(
-                                    st.session_state.current_thread_id,
+                                session_manager.get("conversation_manager").add_message(
+                                    session_manager.get("current_thread_id"),
                                     "assistant",
                                     result["answer"],
                                     sources=result["source_documents"]
                                 )
                                 
-                                st.session_state.messages.append({
+                                session_manager.get("messages").append({
                                     "role": "assistant",
                                     "content": result["answer"],
                                     "sources": result["source_documents"]
                                 })
                             except Exception as e2:
                                 st.error(f"Error: {str(e2)}")
-                                st.session_state.messages.append({
+                                session_manager.get("messages").append({
                                     "role": "assistant",
                                     "content": f"Error: {str(e2)}"
                                 })

@@ -1,0 +1,114 @@
+import streamlit as st
+
+class SessionManager:
+    """Handles Streamlit session state initialization and management."""
+    
+    # --- INITIALIZATION ---
+    
+    def __init__(self):
+        self._initialize_sessions()
+        
+    def _initialize_sessions(self):
+        """Initialize all required session variables with safe defaults"""
+        if "rag_system" not in st.session_state:
+            st.session_state.rag_system = None
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+
+        if "documents_processed" not in st.session_state:
+            st.session_state.documents_processed = False
+
+        if "conversation_manager" not in st.session_state:
+            from src.conversation_manager import ConversationManager
+            st.session_state.conversation_manager = ConversationManager()
+
+        if "current_thread_id" not in st.session_state:
+            st.session_state.current_thread_id = None
+
+        if "use_cache" not in st.session_state:
+            st.session_state.use_cache = True
+
+        if "image_processor" not in st.session_state:
+            try:
+                from src.image_processor import ImageProcessor
+                st.session_state.image_processor = ImageProcessor()
+            except Exception as e:
+                st.warning(f"⚠️ ImageProcessor init failed: {e}")
+                st.session_state.image_processor = None
+
+        if "pasted_image" not in st.session_state:
+            st.session_state.pasted_image = False
+
+        if "regenerate_response" not in st.session_state:
+            st.session_state.regenerate_response = False
+
+        if "is_processing" not in st.session_state:
+            st.session_state.is_processing = False
+            
+        if "pending_query" not in st.session_state:
+            st.session_state.pending_query = None
+            
+        if "pending_inquiry" not in st.session_state:
+            st.session_state.pending_inquiry = {}
+            
+        if "current_suggestions" not in st.session_state:
+            st.session_state.current_suggestions = {}
+            
+        if "selected_response_idx" not in st.session_state:
+            st.session_state.selected_response_idx = None
+            
+        if "selected_response" not in st.session_state:
+            st.session_state.selected_response = {}
+            
+    # --- GETTER & SETTER ---
+            
+    def get(self, key, default=None):
+        """Get a session variable safely."""
+        return st.session_state.get(key, default)
+    
+    def set(self, key, value):
+        """Set a session variable."""
+        st.session_state[key] = value
+    
+    # --- METHODS ---
+    
+    def get_session_snapshot():
+        return st.session_state
+    
+    def clear(self, key):
+        """clear a session variable's value"""
+        del st.session_state[key]
+        
+    def reset_conversation(self):
+        """Clear conversation-related states."""
+        st.session_state.messages = []
+        st.session_state.current_thread_id = None
+        st.session_state.regenerate_response = False
+        
+    def clear_all(self):
+        """Fully reset session state (except cached items)."""
+        keys_to_clear = [
+            "messages",
+            "documents",
+            "current_thread_id",
+            "pasted_image",
+            "regenerate_response",
+            "is_processing"
+        ]
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+                
+        self._initialize_sessions()
+        
+    def start_processing(self):
+        """Mark the app as busy."""
+        st.session_state.is_processing = True
+        
+    def stop_processing(self):
+        """Mark the app as idle."""
+        st.session_state.is_processing = False
+    
+    def is_busy(self):
+        """Check if the app is currently processing"""
+        return st.session_state.is_processing
