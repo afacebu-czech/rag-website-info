@@ -13,6 +13,7 @@ ENV/
 vectorstore/
 *.db
 *.sqlite
+*.bin
 
 # Cache and Conversation History
 cache/
@@ -43,3 +44,6 @@ Thumbs.db
 # Logs
 *.log
 
+vectorstore/sql_lite/rag_chatbot.db
+vectorstore/chroma_db/chroma.sqlite3
+vectorstore/chroma_db/45dd36f5-7f53-4f92-9a3e-46c6c1e04824/data_level0.bin

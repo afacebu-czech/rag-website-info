@@ -1,26 +1,34 @@
 import streamlit as st
-
+from src.conversation_management import ConversationManager
+from src.sqlite_manager import SQLiteManager
 class SessionManager:
     """Handles Streamlit session state initialization and management."""
     
     # --- INITIALIZATION ---
     
-    def __init__(self):
+    def __init__(self, user_id: str=None):
+        self.user_id = user_id
         self._initialize_sessions()
         
     def _initialize_sessions(self):
         """Initialize all required session variables with safe defaults"""
+        if "user_id" not in st.session_state:
+            st.session_state.user_id = self.user_id
+        
         if "rag_system" not in st.session_state:
             st.session_state.rag_system = None
+            
         if "messages" not in st.session_state:
             st.session_state.messages = []
 
         if "documents_processed" not in st.session_state:
             st.session_state.documents_processed = False
+            
+        if "db" not in st.session_state:
+            st.session_state.db = SQLiteManager()
 
         if "conversation_manager" not in st.session_state:
-            from src.conversation_manager import ConversationManager
-            st.session_state.conversation_manager = ConversationManager()
+            st.session_state.conversation_manager = ConversationManager(db=st.session_state.db, user_id=st.session_state.user_id)
 
         if "current_thread_id" not in st.session_state:
             st.session_state.current_thread_id = None
@@ -72,7 +80,7 @@ class SessionManager:
     
     # --- METHODS ---
     
-    def get_session_snapshot():
+    def get_session_snapshot(self):
         return st.session_state
     
     def clear(self, key):
@@ -112,3 +120,11 @@ class SessionManager:
     def is_busy(self):
         """Check if the app is currently processing"""
         return st.session_state.is_processing
+    
+    def set_user(self, user_id: str):
+        """Set the user_id when logged in"""
+        if user_id:
+            st.session_state.user_id = user_id
+            st.session_state.conversation_manager.set_user(user_id)
+            return "User logged in successfully."
+        return "User failed to logged in"

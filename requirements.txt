@@ -2,6 +2,8 @@
 langchain>=1.0.3
 langchain-community>=0.4.1
 langchain-ollama>=1.0.0
+langchain-google-genai
+google-genai
 
 # PDF Processing
 pdfplumber>=0.11.7
@@ -28,4 +30,3 @@ easyocr>=1.7.0
 
 # Multimodal Chat Input (supports image paste in chat box)
 st-chat-input-multimodal>=0.1.0
-

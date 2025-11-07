@@ -10,6 +10,10 @@ load_dotenv()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:8b")
 
+# Gemini Configuration
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
 # Embedding Configuration
 # Note: DeepSeek R1 8B doesn't support embeddings, so we use a dedicated embedding model
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
@@ -47,4 +51,3 @@ MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "50"))  # MB
 # Streamlit Configuration
 PAGE_TITLE = "Business Knowledge Assistant"
 PAGE_ICON = "💼"
-

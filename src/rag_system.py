@@ -1,6 +1,8 @@
 """
 RAG system implementation using LangChain, Ollama, and DeepSeek R1 8B.
 """
+USE_OLLAMA=True
+
 import os
 from typing import List, Optional, Dict
 from langchain_ollama import OllamaLLM, OllamaEmbeddings
@@ -18,7 +20,11 @@ from .document_processor import DocumentProcessor
 import multiprocessing
 from .utils.prompt_templates import PromptTemplates
 from src.vectorstore_manager import VectorstoreManager
+if not USE_OLLAMA:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+from src.utils.logger import AppLogger
 
+logger = AppLogger(name="conversation_manager")
 
 class RAGSystem:
     """RAG system for querying documents using DeepSeek R1 8B."""
@@ -43,55 +49,63 @@ class RAGSystem:
     
     def _initialize_llm(self):
         """Initialize the Ollama LLM (DeepSeek R1 8B) with GPU prioritized, CPU as fallback only."""
-        try:
-            # PRIORITY 1: Configure for GPU usage first
-            # num_gpu=-1 uses all available GPU layers for maximum GPU usage
-            # OllamaLLM accepts these parameters directly or via kwargs
-            llm_params = {
-                "model": config.OLLAMA_MODEL,
-                "base_url": config.OLLAMA_BASE_URL,
-                "temperature": config.TEMPERATURE,
-                "num_predict": config.MAX_TOKENS,
-            }
-            
-            # ALWAYS prioritize GPU - set GPU layers first
-            # Only configure CPU if GPU is explicitly disabled
-            if config.NUM_GPU_LAYERS != 0:
-                # GPU mode: Set GPU layers for maximum GPU utilization
-                llm_params["num_gpu"] = config.NUM_GPU_LAYERS
-                print(f"🚀 GPU mode: Using {config.NUM_GPU_LAYERS} GPU layers (all available)")
-            else:
-                # Only if GPU is explicitly disabled (num_gpu=0), optimize CPU
-                print("⚠️ GPU disabled, using CPU mode")
-            
-            # GPU-optimized parameters (only meaningful when GPU is enabled)
-            if hasattr(config, 'CONTEXT_SIZE') and config.CONTEXT_SIZE:
-                llm_params["num_ctx"] = config.CONTEXT_SIZE
-            if hasattr(config, 'BATCH_SIZE') and config.BATCH_SIZE:
-                llm_params["num_batch"] = config.BATCH_SIZE
-            
-            # CPU threading: Only configure if GPU is disabled or as fallback
-            # When GPU is enabled, CPU threads are used for non-GPU operations
-            if hasattr(config, 'THREAD_COUNT'):
-                if config.THREAD_COUNT > 0:
-                    llm_params["num_thread"] = config.THREAD_COUNT
-                elif config.THREAD_COUNT == 0:
-                    # Use all available CPU threads for CPU operations
-                    llm_params["num_thread"] = multiprocessing.cpu_count()
-            
-            self.llm = OllamaLLM(**llm_params)
-            
-            # Log GPU/CPU configuration
-            if config.NUM_GPU_LAYERS != 0:
-                gpu_info = f"GPU layers: {config.NUM_GPU_LAYERS} (prioritized)"
-                cpu_info = f"CPU threads: {llm_params.get('num_thread', 'auto')} (fallback)"
-            else:
-                gpu_info = "GPU: disabled"
-                cpu_info = f"CPU threads: {llm_params.get('num_thread', 'auto')} (primary)"
-            
-            print(f"✅ LLM initialized: {config.OLLAMA_MODEL} ({gpu_info}, {cpu_info}, Context: {config.CONTEXT_SIZE}, Batch: {config.BATCH_SIZE})")
-        except Exception as e:
-            raise Exception(f"Failed to initialize LLM: {str(e)}")
+        if USE_OLLAMA:
+            try:
+                # PRIORITY 1: Configure for GPU usage first
+                # num_gpu=-1 uses all available GPU layers for maximum GPU usage
+                # OllamaLLM accepts these parameters directly or via kwargs
+                llm_params = {
+                    "model": config.OLLAMA_MODEL,
+                    "base_url": config.OLLAMA_BASE_URL,
+                    "temperature": config.TEMPERATURE,
+                    "num_predict": config.MAX_TOKENS,
+                }
+                
+                # ALWAYS prioritize GPU - set GPU layers first
+                # Only configure CPU if GPU is explicitly disabled
+                if config.NUM_GPU_LAYERS != 0:
+                    # GPU mode: Set GPU layers for maximum GPU utilization
+                    llm_params["num_gpu"] = config.NUM_GPU_LAYERS
+                    print(f"🚀 GPU mode: Using {config.NUM_GPU_LAYERS} GPU layers (all available)")
+                else:
+                    # Only if GPU is explicitly disabled (num_gpu=0), optimize CPU
+                    print("⚠️ GPU disabled, using CPU mode")
+                
+                # GPU-optimized parameters (only meaningful when GPU is enabled)
+                if hasattr(config, 'CONTEXT_SIZE') and config.CONTEXT_SIZE:
+                    llm_params["num_ctx"] = config.CONTEXT_SIZE
+                if hasattr(config, 'BATCH_SIZE') and config.BATCH_SIZE:
+                    llm_params["num_batch"] = config.BATCH_SIZE
+                
+                # CPU threading: Only configure if GPU is disabled or as fallback
+                # When GPU is enabled, CPU threads are used for non-GPU operations
+                if hasattr(config, 'THREAD_COUNT'):
+                    if config.THREAD_COUNT > 0:
+                        llm_params["num_thread"] = config.THREAD_COUNT
+                    elif config.THREAD_COUNT == 0:
+                        # Use all available CPU threads for CPU operations
+                        llm_params["num_thread"] = multiprocessing.cpu_count()
+                
+                self.llm = OllamaLLM(**llm_params)
+                
+                # Log GPU/CPU configuration
+                if config.NUM_GPU_LAYERS != 0:
+                    gpu_info = f"GPU layers: {config.NUM_GPU_LAYERS} (prioritized)"
+                    cpu_info = f"CPU threads: {llm_params.get('num_thread', 'auto')} (fallback)"
+                else:
+                    gpu_info = "GPU: disabled"
+                    cpu_info = f"CPU threads: {llm_params.get('num_thread', 'auto')} (primary)"
+                
+                print(f"✅ LLM initialized: {config.OLLAMA_MODEL} ({gpu_info}, {cpu_info}, Context: {config.CONTEXT_SIZE}, Batch: {config.BATCH_SIZE})")
+            except Exception as e:
+                raise Exception(f"Failed to initialize LLM: {str(e)}")
+        else:
+            llm = ChatGoogleGenerativeAI(
+                model=config.GEMINI_MODEL,
+                temperature=0,
+                max_tokens=None,
+                timeout=None
+            )
     
     def _initialize_embeddings(self):
         """Initialize Ollama embeddings with GPU prioritized, CPU as fallback only."""
@@ -192,6 +206,7 @@ class RAGSystem:
             raise ValueError("Vector store not initialized. Please process documents first.")
         
         try:
+            logger.info("[RAG] Generating {num_suggestions} suggestions for: {question[:80]}")
             # Retrieve source documents first
             source_docs = self._retriever.invoke(question)
             

@@ -4,7 +4,7 @@ import os
 import multiprocessing
 from pathlib import Path
 from src.rag_system import RAGSystem
-from src.conversation_manager import ConversationManager
+from conversation_management import ConversationManager
 from PIL import Image
 import src.config as config
 

@@ -9,10 +9,12 @@ import multiprocessing
 from pathlib import Path
 from src.rag_system import RAGSystem
 from src.document_processor import DocumentProcessor
-from src.conversation_manager import ConversationManager
+from src.conversation_management import ConversationManager
 from PIL import Image
 import src.config as config
 from src.session_management import SessionManager
+from typing import Dict
+from src.sqlite_manager import SQLiteManager
 
 # Set environment variable to avoid OpenMP warning (needed for EasyOCR/numpy)
 os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
@@ -35,8 +37,11 @@ st.set_page_config(
     layout="wide"
 )
 
+# Initialize sqlite db
+db = SQLiteManager()
+
 # Initialize session state
-session_manager = SessionManager()
+session_manager = SessionManager(user_id="USR-123456")
 session_manager._initialize_sessions()
 
 def initialize_rag_system():
@@ -101,6 +106,223 @@ def process_uploaded_files(uploaded_files):
     except Exception as e:
         st.error(f"Error processing documents: {str(e)}")
         return False
+    
+def input_handler(user_input: Dict[str, any]):
+    """Detects what kind of input the user sent (text, image, or both)."""
+    if isinstance(user_input, dict):
+        # Check for image first (pasted or uploaded)
+        # The image can be in different formats: bytes, file-like object, PIL Image, or dict
+        image_data = user_input.get("image") or user_input.get("file") or user_input.get("files")
+        
+        # Handle list of files
+        if isinstance(image_data, list) and len(image_data) > 0:
+            image_data = image_data[0]
+        
+        # If image_data is itself a dict, we'll handle it in the image processing section
+        # Just pass it through - the image processing code will extract the actual data
+        if image_data:
+            uploaded_image = image_data
+            session_manager.set("pasted_image", True)
+            
+            # Also check if there's text with the image
+            if user_input.get("text"):
+                prompt = user_input["text"].strip()
+            elif user_input.get("message"):
+                prompt = user_input["message"].strip()
+                
+        elif user_input.get("text"):
+            # Text only
+            prompt = user_input["text"].strip()
+            session_manager.set("pasted_image", False)
+            
+        elif user_input.get("message"):
+            # Text only (alternative key)
+            prompt = user_input["message"].strip()
+            session_manager.set("pasted_image", False)
+            
+    elif isinstance(user_input, str):
+        # String input (fallback)
+        prompt = user_input.strip()
+        session_manager.set("pasted_image", False)
+        
+    if session_manager.get("pasted_image"):
+        return uploaded_image, prompt
+    else:
+        return None, prompt
+    
+def process_image(uploaded_image):
+    # Clear any previous image processing state
+    if "pending_inquiry" in session_manager.get_session_snapshot() and "image" in session_manager.get("pending_inquiry"):
+        # Only clear if it's a different image
+        pass
+    
+    if session_manager.get("image_processor"):
+        # Handle different image input types
+        try:
+            import io
+            
+            # Handle dictionary format from multimodal_chat_input
+            if isinstance(uploaded_image, dict):
+                # Extract image data from dictionary, Try common keys that might contain the image data
+                image_bytes = None
+                
+                # Check for Streamlit UploadedFile object in dict
+                if 'type' in uploaded_image and uploaded_image.get('type') == 'image':
+                    # Handle image type from multimodal component
+                    image_bytes = uploaded_image.get('content') or uploaded_image.get('data')
+                
+                # Try common keys
+                if not image_bytes:
+                    for key in ['data', 'content', 'bytes', 'file', 'image']:
+                        if key in uploaded_image:
+                            image_bytes = uploaded_image[key]
+                            break
+                
+                # If we found bytes, convert to PIL Image
+                if image_bytes:
+                    if isinstance(image_bytes, bytes):
+                        image = Image.open(io.BytesIO(image_bytes))
+                    elif hasattr(image_bytes, 'read'):
+                        # It's a file-like object
+                        image = Image.open(image_bytes)
+                    elif isinstance(image_bytes, Image.Image):
+                        # Already a PIL Image
+                        image = image_bytes
+                    else:
+                        # Try to convert to bytes if it's a string (base64 or data URI)
+                        import base64
+                        if isinstance(image_bytes, str):
+                            # Check if it's a data URI (data:image/png;base64,...)
+                            if image_bytes.startswith('data:image/'):
+                                # Parse data URI format: data:image/png;base64,<base64_data>
+                                try:
+                                    # Extract base64 data from data URI
+                                    header, encoded = image_bytes.split(',', 1)
+                                    # Extract file type from header (e.g., image/png)
+                                    file_type = header.split(';')[0].split('/')[1]  # Extract 'png' from 'data:image/png'
+                                    # Decode base64
+                                    image_data = base64.b64decode(encoded)
+                                    image = Image.open(io.BytesIO(image_data))
+                                except Exception as e:
+                                    raise ValueError(f"Failed to parse data URI: {str(e)}")
+                            else:
+                                # Try decoding as base64 string
+                                try:
+                                    image_data = base64.b64decode(image_bytes)
+                                    image = Image.open(io.BytesIO(image_data))
+                                except Exception:
+                                    # Not base64, try opening as file path
+                                    image = Image.open(image_bytes)
+                        else:
+                            # Debug: show what we got
+                            st.error(f"Debug: Image dict keys: {list(uploaded_image.keys())}")
+                            st.error(f"Debug: Image data type: {type(image_bytes)}")
+                            raise ValueError(f"Unsupported image data format in dict: {type(image_bytes)}")
+                else:
+                    # Debug: show dictionary structure
+                    st.error(f"Debug: Could not find image data. Dictionary keys: {list(uploaded_image.keys())}")
+                    st.error(f"Debug: Dictionary content preview: {str(uploaded_image)[:200]}")
+                    raise ValueError(f"Could not find image data in dictionary. Keys: {list(uploaded_image.keys())}")
+            elif hasattr(uploaded_image, 'read'):
+                # It's a file-like object (from file_uploader or native Streamlit)
+                image = Image.open(uploaded_image)
+            elif isinstance(uploaded_image, bytes):
+                # It's bytes from multimodal component
+                image = Image.open(io.BytesIO(uploaded_image))
+            elif isinstance(uploaded_image, str):
+                # Handle string input (could be data URI or file path)
+                import base64
+                if uploaded_image.startswith('data:image/'):
+                    # Parse data URI format: data:image/png;base64,<base64_data>
+                    try:
+                        header, encoded = uploaded_image.split(',', 1)
+                        # Extract file type from header (e.g., image/png -> png)
+                        file_type = header.split(';')[0].split('/')[1]
+                        # Decode base64
+                        image_data = base64.b64decode(encoded)
+                        image = Image.open(io.BytesIO(image_data))
+                    except Exception as e:
+                        raise ValueError(f"Failed to parse data URI: {str(e)}")
+                else:
+                    # Try opening as file path
+                    image = Image.open(uploaded_image)
+            else:
+                # Try to open directly (file path or PIL Image)
+                image = Image.open(uploaded_image)
+            
+            with st.spinner("📖 Reading image and extracting text..."):
+                # Display uploaded image in a nice container
+                st.markdown("---")
+                img_col1, img_col2 = st.columns([2, 3])
+                with img_col1:
+                    st.image(image, caption="📷 Pasted/Uploaded Image", width=True)
+                
+                with img_col2:
+                    # Process image
+                    result = st.session_state.image_processor.process_image(image)
+                    
+                    if result["success"]:
+                        # Show extracted information in a compact, friendly format
+                        st.success("✅ Image processed successfully!")
+                        
+                        if result["client_name"]:
+                            st.info(f"👤 **Client:** {result['client_name']}")
+                        else:
+                            st.caption("ℹ️ Client name not detected - responses will use generic greeting")
+                        
+                        if result["inquiry"]:
+                            st.markdown(f"**📝 Inquiry:**")
+                            st.write(result["inquiry"])
+                        
+                        # Show multiple questions if detected
+                        if result.get("has_multiple_questions") and result.get("questions"):
+                            st.success(f"✅ Detected {len(result['questions'])} questions!")
+                            with st.expander(f"📋 View {len(result['questions'])} Individual Questions"):
+                                for i, q in enumerate(result["questions"], 1):
+                                    st.markdown(f"**{i}.** {q}")
+                        
+                        # Show full extracted text in expander
+                        with st.expander("📄 View Full Extracted Text"):
+                            st.text_area("", result["extracted_text"], height=150, label_visibility="collapsed", key="extracted_text_display")
+                        
+                        # Use extracted inquiry as prompt
+                        prompt = result["inquiry"]
+                        client_name = result["client_name"]
+                        
+                        # Validate that we have an inquiry
+                        if not prompt or len(prompt.strip()) < 5:
+                            # If inquiry is too short or empty, use the full extracted text
+                            if result["extracted_text"] and len(result["extracted_text"].strip()) > 10:
+                                prompt = result["extracted_text"].strip()
+                                st.warning("⚠️ No clear inquiry detected. Using full extracted text as inquiry.")
+                            else:
+                                st.error("❌ Could not extract a valid inquiry from the image. Please ensure the text is clear and readable.")
+                                session_manager.stop_processing()
+                                st.stop()
+                                return
+                        
+                        # Add to session state for processing
+                        pending_inquiry_dict = {
+                            "prompt": prompt.strip(),
+                            "client_name": client_name,
+                            "image": image,
+                            "extracted_text": result["extracted_text"]
+                        }
+                        session_manager.set("pending_inquiry", pending_inquiry_dict)
+                        
+                        st.balloons()  # Celebration for successful processing!
+                        st.success("🚀 Ready to generate response suggestions! Processing automatically...")
+                        
+                        # Auto-process after a brief moment
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to process image: {result.get('error', 'Unknown error')}")
+                        st.info("💡 Try a clearer image or check that the text is readable")
+        except Exception as e:
+            st.error(f"❌ Error processing image: {str(e)}")
+            st.info("💡 Make sure the image format is supported (PNG, JPG, JPEG, GIF, BMP)")
+    else:
+        st.error("⚠️ Image processing not available. Please install OCR dependencies: `pip install easyocr pillow`")
 
 def main():
     """Main application function."""
@@ -118,7 +340,7 @@ def main():
                 st.rerun()
         # Conversation threads
         st.subheader("Conversation Threads")
-        threads = session_manager.get("conversation_manager").get_all_threads()
+        threads = session_manager.get("conversation_manager").get_all_conversations()
         if threads:
             # Handle None topic values
             thread_options = {}
@@ -147,7 +369,7 @@ def main():
                     if selected_id != session_manager.get("current_thread_id"):
                         session_manager.set("current_thread_id", selected_id)
                         # Load thread messages
-                        thread_messages = session_manager.get("conversation_manager").get_thread_history(selected_id)
+                        thread_messages = session_manager.get("conversation_manager").get_conversation_history(selected_id)
                         message_dict = [
                             {"role": msg["role"], "content": msg["content"], "sources": msg.get("sources", [])}
                             for msg in thread_messages
@@ -210,12 +432,13 @@ def main():
         with col1:
             if session_manager.get("current_thread_id"):
                 # Get thread topic for display
-                threads = session_manager.get("conversation_manager").get_all_threads()
+                threads = session_manager.get("conversation_manager").get_all_conversations()
                 thread_topic = "Current conversation"
                 for t in threads:
                     if t['thread_id'] == session_manager.get("current_thread_id"):
                         thread_topic = t.get('topic', 'Current conversation')
                         if len(thread_topic) > 40:
+                            thread_topic = thread_topic.replace("\n", " ")
                             thread_topic = thread_topic[:40] + "..."
                         break
                 st.caption(f"💬 Thread: {thread_topic}")
@@ -260,51 +483,17 @@ def main():
             if user_input:
                 session_manager.start_processing()
                 # Handle different return formats from multimodal_chat_input
-                if isinstance(user_input, dict):
-                    # Check for image first (pasted or uploaded)
-                    # The image can be in different formats: bytes, file-like object, PIL Image, or dict
-                    image_data = user_input.get("image") or user_input.get("file") or user_input.get("files")
-                    
-                    # Handle list of files
-                    if isinstance(image_data, list) and len(image_data) > 0:
-                        image_data = image_data[0]
-                    
-                    # If image_data is itself a dict, we'll handle it in the image processing section
-                    # Just pass it through - the image processing code will extract the actual data
-                    if image_data:
-                        uploaded_image = image_data
-                        session_manager.set("pasted_image", True)
-                        # Also check if there's text with the image
-                        if user_input.get("text"):
-                            prompt = user_input["text"].strip()
-                        elif user_input.get("message"):
-                            prompt = user_input["message"].strip()
-                    elif user_input.get("text"):
-                        # Text only
-                        prompt = user_input["text"].strip()
-                        session_manager.set("pasted_image", False)
-                    elif user_input.get("message"):
-                        # Text only (alternative key)
-                        prompt = user_input["message"].strip()
-                        session_manager.set("pasted_image", False)
-                elif isinstance(user_input, str):
-                    # String input (fallback)
-                    prompt = user_input.strip()
-                    session_manager.set("pasted_image", False)
+                uploaded_image, prompt = input_handler(user_input)
         else:
             # Fallback: Use native Streamlit chat_input with file attachment
             # Note: Native version may require clicking attachment button, not direct Ctrl+V
             try:
-                if not session_manager.get("is_processing"):
-                    user_input = st.chat_input(
-                        "💬 Type a message or attach an image...",
-                        key="main_chat_input",
-                        accept_file=True,
-                        file_type=["png", "jpg", "jpeg", "gif", "bmp"]
-                    )
-                else:
-                    st.chat_input("Processing...", key="disabled_input", disabled=True)
-                    user_input = None
+                user_input = st.chat_input(
+                    "💬 Type a message or attach an image...",
+                    key="main_chat_input",
+                    accept_file=True,
+                    file_type=["png", "jpg", "jpeg", "gif", "bmp"]
+                )
                 
                 if user_input:
                     # Check if it's a ChatInput object with files (Streamlit 1.43.0+)
@@ -342,179 +531,7 @@ def main():
         
         # Process image if pasted/uploaded (handles both paste and upload)
         if uploaded_image is not None:
-            # Clear any previous image processing state
-            if "pending_inquiry" in session_manager.get_session_snapshot() and "image" in session_manager.get("pending_inquiry"):
-                # Only clear if it's a different image
-                pass
-            
-            if session_manager.get("image_processor"):
-                # Handle different image input types
-                try:
-                    import io
-                    
-                    # Handle dictionary format from multimodal_chat_input
-                    if isinstance(uploaded_image, dict):
-                        # Extract image data from dictionary
-                        # Try common keys that might contain the image data
-                        image_bytes = None
-                        
-                        # Check for Streamlit UploadedFile object in dict
-                        if 'type' in uploaded_image and uploaded_image.get('type') == 'image':
-                            # Handle image type from multimodal component
-                            image_bytes = uploaded_image.get('content') or uploaded_image.get('data')
-                        
-                        # Try common keys
-                        if not image_bytes:
-                            for key in ['data', 'content', 'bytes', 'file', 'image']:
-                                if key in uploaded_image:
-                                    image_bytes = uploaded_image[key]
-                                    break
-                        
-                        # If we found bytes, convert to PIL Image
-                        if image_bytes:
-                            if isinstance(image_bytes, bytes):
-                                image = Image.open(io.BytesIO(image_bytes))
-                            elif hasattr(image_bytes, 'read'):
-                                # It's a file-like object
-                                image = Image.open(image_bytes)
-                            elif isinstance(image_bytes, Image.Image):
-                                # Already a PIL Image
-                                image = image_bytes
-                            else:
-                                # Try to convert to bytes if it's a string (base64 or data URI)
-                                import base64
-                                if isinstance(image_bytes, str):
-                                    # Check if it's a data URI (data:image/png;base64,...)
-                                    if image_bytes.startswith('data:image/'):
-                                        # Parse data URI format: data:image/png;base64,<base64_data>
-                                        try:
-                                            # Extract base64 data from data URI
-                                            header, encoded = image_bytes.split(',', 1)
-                                            # Extract file type from header (e.g., image/png)
-                                            file_type = header.split(';')[0].split('/')[1]  # Extract 'png' from 'data:image/png'
-                                            # Decode base64
-                                            image_data = base64.b64decode(encoded)
-                                            image = Image.open(io.BytesIO(image_data))
-                                        except Exception as e:
-                                            raise ValueError(f"Failed to parse data URI: {str(e)}")
-                                    else:
-                                        # Try decoding as base64 string
-                                        try:
-                                            image_data = base64.b64decode(image_bytes)
-                                            image = Image.open(io.BytesIO(image_data))
-                                        except Exception:
-                                            # Not base64, try opening as file path
-                                            image = Image.open(image_bytes)
-                                else:
-                                    # Debug: show what we got
-                                    st.error(f"Debug: Image dict keys: {list(uploaded_image.keys())}")
-                                    st.error(f"Debug: Image data type: {type(image_bytes)}")
-                                    raise ValueError(f"Unsupported image data format in dict: {type(image_bytes)}")
-                        else:
-                            # Debug: show dictionary structure
-                            st.error(f"Debug: Could not find image data. Dictionary keys: {list(uploaded_image.keys())}")
-                            st.error(f"Debug: Dictionary content preview: {str(uploaded_image)[:200]}")
-                            raise ValueError(f"Could not find image data in dictionary. Keys: {list(uploaded_image.keys())}")
-                    elif hasattr(uploaded_image, 'read'):
-                        # It's a file-like object (from file_uploader or native Streamlit)
-                        image = Image.open(uploaded_image)
-                    elif isinstance(uploaded_image, bytes):
-                        # It's bytes from multimodal component
-                        image = Image.open(io.BytesIO(uploaded_image))
-                    elif isinstance(uploaded_image, str):
-                        # Handle string input (could be data URI or file path)
-                        import base64
-                        if uploaded_image.startswith('data:image/'):
-                            # Parse data URI format: data:image/png;base64,<base64_data>
-                            try:
-                                header, encoded = uploaded_image.split(',', 1)
-                                # Extract file type from header (e.g., image/png -> png)
-                                file_type = header.split(';')[0].split('/')[1]
-                                # Decode base64
-                                image_data = base64.b64decode(encoded)
-                                image = Image.open(io.BytesIO(image_data))
-                            except Exception as e:
-                                raise ValueError(f"Failed to parse data URI: {str(e)}")
-                        else:
-                            # Try opening as file path
-                            image = Image.open(uploaded_image)
-                    else:
-                        # Try to open directly (file path or PIL Image)
-                        image = Image.open(uploaded_image)
-                    
-                    with st.spinner("📖 Reading image and extracting text..."):
-                        # Display uploaded image in a nice container
-                        st.markdown("---")
-                        img_col1, img_col2 = st.columns([2, 3])
-                        with img_col1:
-                            st.image(image, caption="📷 Pasted/Uploaded Image", width=True)
-                        
-                        with img_col2:
-                            # Process image
-                            result = st.session_state.image_processor.process_image(image)
-                            
-                            if result["success"]:
-                                # Show extracted information in a compact, friendly format
-                                st.success("✅ Image processed successfully!")
-                                
-                                if result["client_name"]:
-                                    st.info(f"👤 **Client:** {result['client_name']}")
-                                else:
-                                    st.caption("ℹ️ Client name not detected - responses will use generic greeting")
-                                
-                                if result["inquiry"]:
-                                    st.markdown(f"**📝 Inquiry:**")
-                                    st.write(result["inquiry"])
-                                
-                                # Show multiple questions if detected
-                                if result.get("has_multiple_questions") and result.get("questions"):
-                                    st.success(f"✅ Detected {len(result['questions'])} questions!")
-                                    with st.expander(f"📋 View {len(result['questions'])} Individual Questions"):
-                                        for i, q in enumerate(result["questions"], 1):
-                                            st.markdown(f"**{i}.** {q}")
-                                
-                                # Show full extracted text in expander
-                                with st.expander("📄 View Full Extracted Text"):
-                                    st.text_area("", result["extracted_text"], height=150, label_visibility="collapsed", key="extracted_text_display")
-                                
-                                # Use extracted inquiry as prompt
-                                prompt = result["inquiry"]
-                                client_name = result["client_name"]
-                                
-                                # Validate that we have an inquiry
-                                if not prompt or len(prompt.strip()) < 5:
-                                    # If inquiry is too short or empty, use the full extracted text
-                                    if result["extracted_text"] and len(result["extracted_text"].strip()) > 10:
-                                        prompt = result["extracted_text"].strip()
-                                        st.warning("⚠️ No clear inquiry detected. Using full extracted text as inquiry.")
-                                    else:
-                                        st.error("❌ Could not extract a valid inquiry from the image. Please ensure the text is clear and readable.")
-                                        session_manager.stop_processing()
-                                        st.stop()
-                                        return
-                                
-                                # Add to session state for processing
-                                pending_inquiry_dict = {
-                                    "prompt": prompt.strip(),
-                                    "client_name": client_name,
-                                    "image": image,
-                                    "extracted_text": result["extracted_text"]
-                                }
-                                session_manager.set("pending_inquiry", pending_inquiry_dict)
-                                
-                                st.balloons()  # Celebration for successful processing!
-                                st.success("🚀 Ready to generate response suggestions! Processing automatically...")
-                                
-                                # Auto-process after a brief moment
-                                st.rerun()
-                            else:
-                                st.error(f"❌ Failed to process image: {result.get('error', 'Unknown error')}")
-                                st.info("💡 Try a clearer image or check that the text is readable")
-                except Exception as e:
-                    st.error(f"❌ Error processing image: {str(e)}")
-                    st.info("💡 Make sure the image format is supported (PNG, JPG, JPEG, GIF, BMP)")
-            else:
-                st.error("⚠️ Image processing not available. Please install OCR dependencies: `pip install easyocr pillow`")
+            process_image(uploaded_image)
         
         # Process text prompt or pending inquiry
         if prompt or session_manager.get("pending_inquiry"):
@@ -600,21 +617,22 @@ def main():
                             # Check cache first if enabled (but skip if regeneration requested)
                             cached_result = None
                             if session_manager.get("use_cache") and not regenerate_requested:
-                                cached_result = session_manager.get("conversation_manager").find_similar_question(prompt)
+                                # cached_result = session_manager.get("conversation_manager").find_similar_question(prompt)
                                 if cached_result and cached_result.get("similarity", 0) >= 0.9:
-                                    st.info("💾 Using cached answer (similar question found)")
-                                    # Show option to regenerate even if cached
-                                    col1, col2 = st.columns([3, 1])
-                                    with col2:
-                                        if st.button("🔄 Regenerate", key="regenerate_cached", use_container_width=True):
-                                            st.session_state.regenerate_response = True
-                                            st.rerun()
-                                    result = {
-                                        "suggestions": [cached_result["answer"]],
-                                        "source_documents": cached_result.get("source_documents", []),
-                                        "cached": True,
-                                        "original_question": cached_result.get("original_question")
-                                    }
+                                    # st.info("💾 Using cached answer (similar question found)")
+                                    # # Show option to regenerate even if cached
+                                    # col1, col2 = st.columns([3, 1])
+                                    # with col2:
+                                    #     if st.button("🔄 Regenerate", key="regenerate_cached", use_container_width=True):
+                                    #         st.session_state.regenerate_response = True
+                                    #         st.rerun()
+                                    # result = {
+                                    #     "suggestions": [cached_result["answer"]],
+                                    #     "source_documents": cached_result.get("source_documents", []),
+                                    #     "cached": True,
+                                    #     "original_question": cached_result.get("original_question")
+                                    # }
+                                    pass
                                 else:
                                     # Get conversation context
                                     conversation_context = session_manager.get("conversation_manager").get_thread_context(
