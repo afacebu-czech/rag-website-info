@@ -15,6 +15,9 @@ import src.config as config
 from src.session_management import SessionManager
 from typing import Dict
 from src.sqlite_manager import SQLiteManager
+from src.utils.logger import AppLogger
+
+logger = AppLogger()
 
 # Set environment variable to avoid OpenMP warning (needed for EasyOCR/numpy)
 os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
@@ -821,7 +824,7 @@ def main():
                                         st.markdown(f"**Option {idx}:**")
                                         st.markdown(suggestion)
                                     with col2:
-                                        if st.button("📋 Use This", key=f"select_{idx}_{len(session_manager.get("messages"))}", use_container_width=True):
+                                        if st.button("📋 Use This", key=f"select_{idx}_{len(session_manager.get('messages'))}", use_container_width=True):
                                             session_manager.set("selected_response_idx", idx)
                                             session_manager.set("selected_response", suggestion)
                                             st.rerun()

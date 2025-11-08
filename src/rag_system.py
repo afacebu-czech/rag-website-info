@@ -1,8 +1,6 @@
 """
 RAG system implementation using LangChain, Ollama, and DeepSeek R1 8B.
 """
-USE_OLLAMA=True
-
 import os
 from typing import List, Optional, Dict
 from langchain_ollama import OllamaLLM, OllamaEmbeddings
@@ -20,8 +18,12 @@ from .document_processor import DocumentProcessor
 import multiprocessing
 from .utils.prompt_templates import PromptTemplates
 from src.vectorstore_manager import VectorstoreManager
+
+USE_OLLAMA=config.USE_OLLAMA
+
 if not USE_OLLAMA:
     from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_nomic import NomicEmbeddings
 from src.utils.logger import AppLogger
 
 logger = AppLogger(name="conversation_manager")
@@ -100,7 +102,7 @@ class RAGSystem:
             except Exception as e:
                 raise Exception(f"Failed to initialize LLM: {str(e)}")
         else:
-            llm = ChatGoogleGenerativeAI(
+            self.llm = ChatGoogleGenerativeAI(
                 model=config.GEMINI_MODEL,
                 temperature=0,
                 max_tokens=None,
@@ -109,31 +111,41 @@ class RAGSystem:
     
     def _initialize_embeddings(self):
         """Initialize Ollama embeddings with GPU prioritized, CPU as fallback only."""
-        try:
-            embedding_params = {
-                "model": config.EMBEDDING_MODEL,
-                "base_url": config.OLLAMA_BASE_URL,
-            }
-            
-            # PRIORITY 1: ALWAYS try GPU first for embeddings
-            # Embeddings benefit greatly from GPU acceleration
-            if hasattr(config, 'NUM_GPU_LAYERS') and config.NUM_GPU_LAYERS != 0:
-                embedding_params["num_gpu"] = config.NUM_GPU_LAYERS
-                print(f"🚀 Embeddings GPU mode: Using {config.NUM_GPU_LAYERS} GPU layers (prioritized)")
-            else:
-                print("⚠️ Embeddings GPU disabled, using CPU mode")
-            
-            self.embeddings = OllamaEmbeddings(**embedding_params)
-            
-            # Log GPU/CPU configuration
-            if hasattr(config, 'NUM_GPU_LAYERS') and config.NUM_GPU_LAYERS != 0:
-                gpu_info = f"GPU layers: {config.NUM_GPU_LAYERS} (prioritized)"
-            else:
-                gpu_info = "GPU: disabled (CPU fallback)"
-            
-            print(f"✅ Embeddings initialized: {config.EMBEDDING_MODEL} ({gpu_info})")
-        except Exception as e:
-            raise Exception(f"Failed to initialize embeddings: {str(e)}")
+        if USE_OLLAMA:
+            try:
+                embedding_params = {
+                    "model": config.EMBEDDING_MODEL,
+                    "base_url": config.OLLAMA_BASE_URL,
+                }
+                
+                # PRIORITY 1: ALWAYS try GPU first for embeddings
+                # Embeddings benefit greatly from GPU acceleration
+                if hasattr(config, 'NUM_GPU_LAYERS') and config.NUM_GPU_LAYERS != 0:
+                    embedding_params["num_gpu"] = config.NUM_GPU_LAYERS
+                    print(f"🚀 Embeddings GPU mode: Using {config.NUM_GPU_LAYERS} GPU layers (prioritized)")
+                else:
+                    print("⚠️ Embeddings GPU disabled, using CPU mode")
+                
+                self.embeddings = OllamaEmbeddings(**embedding_params)
+                
+                # Log GPU/CPU configuration
+                if hasattr(config, 'NUM_GPU_LAYERS') and config.NUM_GPU_LAYERS != 0:
+                    gpu_info = f"GPU layers: {config.NUM_GPU_LAYERS} (prioritized)"
+                else:
+                    gpu_info = "GPU: disabled (CPU fallback)"
+                
+                print(f"✅ Embeddings initialized: {config.EMBEDDING_MODEL} ({gpu_info})")
+            except Exception as e:
+                raise Exception(f"Failed to initialize embeddings: {str(e)}")
+        else:
+            try:
+                # Fallback: Nomic embeddings
+                logger.info("Using nomic embeddings (Google-compatible fallback)")
+                embedding_model = getattr(config, "EMBEDDING_MODEL", "embedding-gecko-001")
+                self.embeddings = NomicEmbeddings(model=embedding_model)
+                logger.info(f"Nomic embeddings initialized: {embedding_model}")
+            except Exception as e:
+                raise Exception(f"Failed to initialize Nomic embeddings: {str(e)}")
         
     def process_documents(self, file_paths: List[str]):
         """Process documents and create vector store"""
@@ -206,7 +218,7 @@ class RAGSystem:
             raise ValueError("Vector store not initialized. Please process documents first.")
         
         try:
-            logger.info("[RAG] Generating {num_suggestions} suggestions for: {question[:80]}")
+            logger.info(f"[RAG] Generating {num_suggestions} suggestions for: {question[:80]}")
             # Retrieve source documents first
             source_docs = self._retriever.invoke(question)
             
@@ -405,7 +417,7 @@ class RAGSystem:
                 })
             
             return {
-                "answer": answer,
+                "answer": answer.content,
                 "source_documents": filtered_sources
             }
         except Exception as e:

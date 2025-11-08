@@ -76,6 +76,7 @@ class PromptTemplates:
                                 Question: {question}
 
                                 Answer guidelines:
+                                - If you don't know the answer, just say you don't know or cannot assist with that politely
                                 - Use clear, everyday business language - no technical terms
                                 - Be conversational and friendly, like talking to a colleague
                                 - Keep answers concise but complete (2-3 sentences when possible)
