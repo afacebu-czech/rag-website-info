@@ -11,7 +11,7 @@ class SQLiteManager:
     - Provide conversation-specific helper methods (for chat history)
     """
     
-    def __init__(self, db_path: str="./vectorstore/sql_lite/rag_chatbot.db"):
+    def __init__(self, db_path: str="./database/structured/rag_chatbot.db"):
         self.db_path = db_path
         self._init_default_schema()
         

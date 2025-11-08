@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+USE_OLLAMA = False
+
 # Ollama Configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:8b")
@@ -16,7 +18,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 # Embedding Configuration
 # Note: DeepSeek R1 8B doesn't support embeddings, so we use a dedicated embedding model
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text-v1.5")
 
 # Document Processing Configuration
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1500"))  # Larger chunks = fewer chunks to process
@@ -41,8 +43,8 @@ PARALLEL_PROCESSING = os.getenv("PARALLEL_PROCESSING", "true").lower() == "true"
 THREAD_COUNT = int(os.getenv("THREAD_COUNT", "0"))  # 0 = use all available CPU threads
 
 # Vector Store Configuration
-VECTORSTORE_DIR = os.getenv("VECTORSTORE_DIR", "./vectorstore")
-PERSIST_DIRECTORY = os.path.join(VECTORSTORE_DIR, "chroma_db")
+VECTORSTORE_DIR = os.getenv("VECTORSTORE_DIR", "./database")
+PERSIST_DIRECTORY = os.path.join(VECTORSTORE_DIR, "vectorstore")
 
 # File Upload Configuration
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./data/uploads")
@@ -51,3 +53,6 @@ MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "50"))  # MB
 # Streamlit Configuration
 PAGE_TITLE = "Business Knowledge Assistant"
 PAGE_ICON = "💼"
+
+os.environ["USER_AGENT"] = "my-rag-app/1.0"
+USER_AGENT = os.environ.get("USER_AGENT")

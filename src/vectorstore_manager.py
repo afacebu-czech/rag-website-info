@@ -81,13 +81,17 @@ class VectorstoreManager:
         
         try:
             # Get collection count
-            collection = self.vectorstore._collection
+            collection = getattr(self.vectorstore, "_collection", None)
             count = collection.count() if collection else 0
+            
+            persist_path = getattr(config, "PERSIST_DIRECTORY", None)
+            sqlite_path = os.path.join(persist_path, "chroma.sqlite3") if persist_path else None
+            sqlite_exists = os.path.exists(sqlite_path) if sqlite_path else False
             
             return {
                 "status": "initialized",
                 "document_count": count,
-                "persist_directory": config.PERSIST_DIRECTORY if os.path.exists(config.PERSIST_DIRECTORY) else None,
+                "persist_directory": persist_path if sqlite_exists else None
             }
         except Exception as e:
             return {
