@@ -371,7 +371,7 @@ def main():
                         # Load thread messages
                         thread_messages = session_manager.get("conversation_manager").get_conversation_history(selected_id)
                         message_dict = [
-                            {"role": msg["role"], "content": msg["content"], "sources": msg.get("sources", [])}
+                            {"role": msg["sender"], "content": msg["message"], "sources": msg.get("sources", [])}
                             for msg in thread_messages
                         ]
                         session_manager.set("messages", message_dict)

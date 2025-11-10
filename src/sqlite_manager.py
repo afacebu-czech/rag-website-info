@@ -246,13 +246,26 @@ class SQLiteManager:
                 where="id = ?",
                 params=(conversation_id,)
             )
-        
+    
+    def get_count_message_of_conversation(self, conversation_id: str):
+        """Get the number of messages of the conversation"""
+        if conversation_id:
+            result = self.select(
+                "messages",
+                where="conversation_id = ?",
+                params=(conversation_id,),
+                columns="COUNT(conversation_id)",
+                fetch="one"
+            )
+            return next(iter(result.values())) if result else 0
+            
     # --- User Helpers
         
 def scripts():
     sql = SQLiteManager()
 
-    sql.add_message("CNV_226936eafa75","user","Maziltov")
+    num_messages = sql.get_count_message_of_conversation(conversation_id="CNV_c0e80ac0b99f")
+    print(num_messages)
 
 def main():
     scripts()

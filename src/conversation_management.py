@@ -164,14 +164,15 @@ class ConversationManager:
         threads = []
         for thread_data in self.db.get_all_conversations_of_user(self.user_id):
             topic = thread_data.get("title")
+            conversation_id = thread_data.get("id")
             if not topic:
                 topic = "Untitled Conversation"
                 
             threads.append({
-                "thread_id": thread_data.get("id"),
+                "thread_id": conversation_id,
                 "topic": topic,
                 "created_at": thread_data.get("created_at"),
-                "message_count": 1
+                "message_count": self.db.get_count_message_of_conversation(conversation_id)
             })
         return sorted(threads, key=lambda x: x.get("created_at", ""), reverse=True)
     
@@ -188,3 +189,8 @@ class ConversationManager:
     #         del self.conversations[thread_id]
     #         self._save_conversations()
 
+def main():
+    pass
+    
+if __name__ == "__main__":
+    main()
