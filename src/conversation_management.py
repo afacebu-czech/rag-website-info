@@ -98,6 +98,12 @@ class ConversationManager:
         self.conversations = self.db.get_all_conversations_of_user(self.user_id)                
         return conversation_id
     
+    # session_manager.get("conversation_manager").cache_answer(
+    #     prompt,
+    #     result["suggestions"][0] if result["suggestions"] else result.get("answer", ""),
+    #     result["source_documents"]
+    # )
+    
     #SQLite
     def add_message(self, conversation_id: str, sender: str, message: str, sources: List[Dict] = None, metadata: Dict = None, message_id: str=None):
         """Add a message to a conversation thread."""
@@ -125,30 +131,32 @@ class ConversationManager:
     #SQLite
     def get_conversation_history(self, conversation_id: str, max_messages: int = 10) -> List[Dict]:
         """Get conversation history for a thread."""
-        # if thread_id not in self.conversations:
-        #    return []
-        
-        if conversation_id not in self.db.get_all_conversations_of_user(self.user_id):
+        conversations = self.db.get_all_conversations_of_user(self.user_id)
+        self.conversations = conversations
+
+        valid_conversation_ids = {
+            conversation.get("id") for conversation in conversations if conversation.get("id")
+        }
+        if conversation_id not in valid_conversation_ids:
             return []
-        
+
         messages = self.db.get_all_messages_from_conversation(conversation_id)
-        
-        # messages = self.conversations[thread_id]["messages"]
-        # Return last N messages
-        return messages[-max_messages:] if len(messages) > max_messages else messages
+        if len(messages) <= max_messages:
+            return messages
+        return messages[-max_messages:]
     
-    #Cache
-    def get_thread_context(self, thread_id: str) -> str:
+    #SQLite
+    def get_thread_context(self, conversation_id: str) -> str:
         """Get formatted context from thread history for prompt."""
-        history = self.get_conversation_history(thread_id)
+        history = self.get_conversation_history(conversation_id)
         
         if not history:
             return ""
         
         context_parts = []
         for msg in history:
-            role = "User" if msg["role"] == "user" else "Assistant"
-            context_parts.append(f"{role}: {msg['content']}")
+            role = "User" if msg["sender"] == "user" else "Assistant"
+            context_parts.append(f"{role}: {msg['message']}")
         
         return "\n".join(context_parts)
     
@@ -157,10 +165,7 @@ class ConversationManager:
         """
         Get all conversation threads with metadata.
         Each thread includes: id, title/topic, created_at, message_count.
-        """
-        messages = []
-        
-        
+        """        
         threads = []
         for thread_data in self.db.get_all_conversations_of_user(self.user_id):
             topic = thread_data.get("title")

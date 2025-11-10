@@ -206,7 +206,7 @@ class RAGSystem:
             raise ValueError("Vector store not initialized. Please process documents first.")
         
         try:
-            logger.info("[RAG] Generating {num_suggestions} suggestions for: {question[:80]}")
+            logger.info(f"[RAG] Generating {num_suggestions} suggestions for: {question[:80]}")
             # Retrieve source documents first
             source_docs = self._retriever.invoke(question)
             

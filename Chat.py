@@ -15,6 +15,9 @@ import src.config as config
 from src.session_management import SessionManager
 from typing import Dict
 from src.sqlite_manager import SQLiteManager
+from src.utils.logger import AppLogger
+
+logger = AppLogger()
 
 # Set environment variable to avoid OpenMP warning (needed for EasyOCR/numpy)
 os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
@@ -41,8 +44,9 @@ st.set_page_config(
 db = SQLiteManager()
 
 # Initialize session state
-session_manager = SessionManager(user_id="USR-123456")
-session_manager._initialize_sessions()
+if "session_manager" not in st.session_state:
+    st.session_state["session_manager"] = SessionManager(user_id="USR-123456")
+session_manager = st.session_state["session_manager"]
 
 def initialize_rag_system():
     """Initialize the RAG system."""
@@ -326,14 +330,12 @@ def process_image(uploaded_image):
 
 def main():
     """Main application function."""
-    st.set_page_config(page_title="Business Knowledge Assistant", page_icon="💼")
     st.title("💼 Business Knowledge Assistant")
     st.markdown("**Get instant answers from your company documents**")
     rag = initialize_rag_system()
     
     # Sidebar
     with st.sidebar:
-        rag = initialize_rag_system()
         if st.button("🆕 New Thread", use_container_width=True):
                 session_manager.set("current_thread_id", session_manager.get("conversation_manager").create_conversation_thread())
                 session_manager.set("messages", [])
@@ -344,7 +346,7 @@ def main():
         if threads:
             # Handle None topic values
             thread_options = {}
-            for t in threads[:5]:
+            for t in threads:
                 topic = t.get('topic') or 'Untitled Conversation'
                 topic_display = topic[:50] + "..." if len(topic) > 50 else topic
                 msg_count = t.get('message_count', 0)
@@ -362,6 +364,7 @@ def main():
                     "Switch to thread:",
                     options=list(thread_options.keys()),
                     index=current_index,
+                    key="thread_selectbox",
                     help="Select a previous conversation thread"
                 )
                 if selected_thread:
@@ -448,21 +451,21 @@ def main():
         # Display chat messages
         for message in session_manager.get("messages"):
             with st.chat_message(message["role"]):
-                # Show cached indicator if applicable
-                if message.get("cached"):
-                    st.caption("💾 From cache")
+                # # Show cached indicator if applicable
+                # if message.get("cached"):
+                #     st.caption("💾 From cache")
                 st.markdown(message["content"])
                 
                 # Show source documents if available (business-friendly format)
-                if message["role"] == "assistant" and "sources" in message:
-                    with st.expander("📄 Reference Documents"):
-                        for i, source in enumerate(message["sources"], 1):
-                            doc_name = source.get("source", "Document")
-                            doc_name = doc_name.replace("_", " ").replace("-", " ").title()
-                            st.markdown(f"**{doc_name}**")
-                            if source.get("content"):
-                                preview = source["content"][:200] + "..." if len(source["content"]) > 200 else source["content"]
-                                st.caption(preview)
+                # if message["role"] == "assistant" and "sources" in message:
+                #     with st.expander("📄 Reference Documents"):
+                #         for i, source in enumerate(message["sources"], 1):
+                #             doc_name = source.get("source", "Document")
+                #             doc_name = doc_name.replace("_", " ").replace("-", " ").title()
+                #             st.markdown(f"**{doc_name}**")
+                #             if source.get("content"):
+                #                 preview = source["content"][:200] + "..." if len(source["content"]) > 200 else source["content"]
+                #                 st.caption(preview)
         
         # Unified chat input that accepts both text and images (like ChatGPT, Messenger)
         # Supports Ctrl+V paste directly in the chat box
@@ -589,7 +592,9 @@ def main():
             display_message = prompt
             if client_name:
                 display_message = f"**{client_name}** asks: {prompt}"
-            session_manager.get("messages").append({"role": "user", "content": display_message})
+            message = session_manager.get("messages")
+            message.append({"role": "user", "content": display_message})
+            session_manager.set("messages", message)
             
             # Display user message
             with st.chat_message("user"):
@@ -668,12 +673,17 @@ def main():
                                             else:
                                                 raise Exception("Could not generate any response")
                                         
-                                        # Cache the answer
-                                        session_manager.get("conversation_manager").cache_answer(
-                                            prompt,
-                                            result["suggestions"][0] if result["suggestions"] else result.get("answer", ""),
-                                            result["source_documents"]
-                                        )
+                                        # Save the answer to database
+                                        try:
+                                            session_manager.get("conversation_manager").add_message(
+                                                conversation_id=session_manager.get("current_thread_id"),
+                                                sender="assistant",
+                                                message=result["suggestions"][0] if result["suggestions"] else result.get("answer", ""),
+                                                # result["source_documents"]
+                                            )
+                                        except Exception as e:
+                                            logger.exception(f"Saving AI response failed")
+                                            
                                         result["cached"] = False
                                     except Exception as e:
                                         st.error(f"❌ Error generating responses: {str(e)}")
@@ -774,7 +784,7 @@ def main():
                                             session_manager.get("current_thread_id"),
                                             "assistant",
                                             fallback_result["answer"],
-                                            sources=fallback_result.get("source_documents", [])
+                                            # sources=fallback_result.get("source_documents", [])
                                         )
                                         session_manager.get("messages").append({
                                             "role": "assistant",
@@ -813,19 +823,24 @@ def main():
                                 "inquiry": prompt
                             })
                             
-                            # Display each suggestion with a select button
-                            for idx, suggestion in enumerate(suggestions, 1):
-                                with st.container():
-                                    col1, col2 = st.columns([4, 1])
-                                    with col1:
-                                        st.markdown(f"**Option {idx}:**")
-                                        st.markdown(suggestion)
-                                    with col2:
-                                        if st.button("📋 Use This", key=f"select_{idx}_{len(session_manager.get("messages"))}", use_container_width=True):
-                                            session_manager.set("selected_response_idx", idx)
-                                            session_manager.set("selected_response", suggestion)
-                                            st.rerun()
-                                    
+                            if selected_response and selected_idx:
+                                # Display the selected response
+                                st.markdown(f"**Selected Response {selected_idx}:**\n\n{selected_response}")
+                            else:
+                                # Display each suggestion with a button
+                                for idx, suggestion in enumerate(suggestions, 1):
+                                    with st.container():
+                                        col1, col2 = st.columns([4, 1])
+                                        with col1:
+                                            st.markdown(f"**Option {idx}:**")
+                                            st.markdown(suggestion)
+                                        with col2:
+                                            if st.button("📋 Use This", key=f"select_{idx}_{len(session_manager.get('messages', []))}", use_container_width=True):
+                                                # Save the selection
+                                                session_manager.set("selected_response_idx", idx)
+                                                session_manager.set("selected_response", suggestion)
+                                                # Persist the selection for messages
+                                                st.rerun()
                                     if idx < len(suggestions):
                                         st.divider()
                             
@@ -838,9 +853,10 @@ def main():
                                     st.rerun()
                             
                             # Check if a response was selected (from previous interaction)
-                            if session_manager.get("selected_response") and session_manager.get("selected_response_idx"):
-                                selected_response = session_manager.get("selected_response")
-                                selected_idx = session_manager.get("selected_response_idx")
+                            selected_response = session_manager.get("selected_response")
+                            selected_idx = session_manager.get("selected_response_idx")
+                            
+                            if selected_response and selected_idx:
                                 
                                 # Get stored suggestions data
                                 stored_data = session_manager.get("current_suggestions", {})
@@ -850,24 +866,26 @@ def main():
                                     session_manager.get("current_thread_id"),
                                     "assistant",
                                     selected_response,
-                                    sources=stored_data.get("sources", result["source_documents"])
+                                    # sources=stored_data.get("sources", result["source_documents"])
                                 )
                                 
-                                session_manager.get("messages").append({
+                                messages = session_manager.get("messages") or []
+                                messages.append({
                                     "role": "assistant",
                                     "content": f"**Selected Response {selected_idx}:**\n\n{selected_response}",
                                     "sources": stored_data.get("sources", result["source_documents"]),
                                     "suggestions": stored_data.get("suggestions", suggestions),
                                     "selected": selected_idx
                                 })
+                                session_manager.set("messages", messages)
                                 
                                 # Clear selection state
                                 session_manager.clear("selected_response")
                                 session_manager.clear("selected_response_idx")
-                                if "current_suggestions" in session_manager.get_session_snapshot():
-                                    session_manager.clear("current_suggestions")
+                                session_manager.clear("current_suggestions")
                                 
                                 st.success(f"✅ Response {selected_idx} selected and saved!")
+                                logger.info(f"Response {selected_idx} selected and saved!")
                                 st.rerun()
                             
                             # Show source documents

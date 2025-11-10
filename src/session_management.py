@@ -19,7 +19,7 @@ class SessionManager:
             st.session_state.rag_system = None
             
         if "messages" not in st.session_state:
-            st.session_state.messages = []
+            st.session_state['messages'] = []
 
         if "documents_processed" not in st.session_state:
             st.session_state.documents_processed = False
