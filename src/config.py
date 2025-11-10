@@ -10,7 +10,7 @@ USE_OLLAMA = False
 
 # Ollama Configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:8b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:70b")
 
 # Gemini Configuration
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")

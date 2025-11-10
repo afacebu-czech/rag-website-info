@@ -48,9 +48,9 @@ class PromptTemplates:
                                     - IMPORTANT: If the inquiry contains multiple questions, make sure to answer ALL questions comprehensively
                                     - When multiple questions are present, organize your response to address each question clearly
                                     - Each response should have a slightly different tone or approach:
-                                    * Response 1: More empathetic and understanding
-                                    * Response 2: More solution-focused and action-oriented
-                                    * Response 3+: Vary between warm, professional, or solution-oriented
+                                        * Response 1: More empathetic and understanding
+                                        * Response 2: More solution-focused and action-oriented
+                                        * Response 3+: Vary between warm, professional, or solution-oriented
                                     - Personalize based on their specific inquiry
                                     - Only use information from the provided documents - if information isn't available, acknowledge it gracefully
                                     - Keep responses concise but complete (3-4 sentences for single questions, 5-7 sentences for multiple questions)
