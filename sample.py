@@ -1,4 +1,83 @@
 """
+Streamlit sample showing stable suggestion selection with session persistence.
+"""
+import streamlit as st
+
+
+st.set_page_config(page_title="Suggestion Selector", layout="wide")
+
+
+def initialize_session_state() -> None:
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = []
+    if "last_selected_idx" not in st.session_state:
+        st.session_state["last_selected_idx"] = None
+
+
+def save_suggestion(idx: int, suggestion_text: str) -> None:
+    st.session_state["messages"].append(
+        {
+            "role": "assistant",
+            "content": suggestion_text,
+        }
+    )
+    st.session_state["last_selected_idx"] = idx
+
+
+def render_messages() -> None:
+    st.markdown("### Conversation History")
+    if not st.session_state["messages"]:
+        st.caption("No responses selected yet.")
+        return
+
+    for entry in st.session_state["messages"]:
+        with st.chat_message(entry["role"]):
+            st.markdown(entry["content"])
+
+
+def render_suggestions(suggestions: list[str]) -> None:
+    st.markdown("### Suggested Responses")
+    for idx, suggestion in enumerate(suggestions, start=1):
+        container = st.container()
+        with container:
+            suggestion_cols = st.columns([4, 1])
+            with suggestion_cols[0]:
+                st.markdown(f"**Option {idx}:**")
+                st.markdown(suggestion)
+            with suggestion_cols[1]:
+                button_key = f"use_suggestion_{idx}"
+                if st.button("📋 Use This", key=button_key, use_container_width=True):
+                    save_suggestion(idx, suggestion)
+                    st.success(f"Response {idx} selected and saved!")
+                    st.experimental_rerun()
+
+
+def main() -> None:
+    initialize_session_state()
+
+    st.title("LLM Suggestions Playground")
+    st.caption("Click a suggestion to add it to the conversation history.")
+
+    # Mocked LLM suggestions
+    mock_suggestions = [
+        "Hello there! I’m happy to assist with your inquiry. Can you share more details about your request?",
+        "Thanks for reaching out. I’ve reviewed your question and here is a tailored response based on our documents.",
+    ]
+
+    render_suggestions(mock_suggestions)
+
+    if st.session_state["last_selected_idx"]:
+        st.success(
+            f"Latest selection: Option {st.session_state['last_selected_idx']}."
+        )
+
+    st.markdown("---")
+    render_messages()
+
+
+if __name__ == "__main__":
+    main()
+"""
 Streamlit application for the Local RAG System.
 """
 import streamlit as st

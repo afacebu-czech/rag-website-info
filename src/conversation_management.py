@@ -98,12 +98,6 @@ class ConversationManager:
         self.conversations = self.db.get_all_conversations_of_user(self.user_id)                
         return conversation_id
     
-    # session_manager.get("conversation_manager").cache_answer(
-    #     prompt,
-    #     result["suggestions"][0] if result["suggestions"] else result.get("answer", ""),
-    #     result["source_documents"]
-    # )
-    
     #SQLite
     def add_message(self, conversation_id: str, sender: str, message: str, sources: List[Dict] = None, metadata: Dict = None, message_id: str=None):
         """Add a message to a conversation thread."""
@@ -131,15 +125,18 @@ class ConversationManager:
     #SQLite
     def get_conversation_history(self, conversation_id: str, max_messages: int = 10) -> List[Dict]:
         """Get conversation history for a thread."""
+        # if thread_id not in self.conversations:
+        #    return []
+        
         conversations = self.db.get_all_conversations_of_user(self.user_id)
         self.conversations = conversations
-
+        
         valid_conversation_ids = {
             conversation.get("id") for conversation in conversations if conversation.get("id")
         }
         if conversation_id not in valid_conversation_ids:
             return []
-
+        
         messages = self.db.get_all_messages_from_conversation(conversation_id)
         if len(messages) <= max_messages:
             return messages

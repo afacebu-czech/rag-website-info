@@ -12,6 +12,9 @@ class SessionManager:
         
     def _initialize_sessions(self):
         """Initialize all required session variables with safe defaults"""
+        if st.session_state.get("_initialized", False):
+            return
+        
         if "user_id" not in st.session_state:
             st.session_state.user_id = self.user_id
         
@@ -62,12 +65,19 @@ class SessionManager:
         if "current_suggestions" not in st.session_state:
             st.session_state.current_suggestions = {}
             
+        if "is_suggestion_generated" not in st.session_state:
+            st.session_state.is_suggestion_generate = False
+            
         if "selected_response_idx" not in st.session_state:
             st.session_state.selected_response_idx = None
             
         if "selected_response" not in st.session_state:
-            st.session_state.selected_response = {}
-            
+            st.session_state.selected_response = None
+        
+        if "current_tab" not in st.session_state:
+            st.session_state.current_tab = "tab1"
+        
+        st.session_state["_initialized"] = True
     # --- GETTER & SETTER ---
             
     def get(self, key, default=None):

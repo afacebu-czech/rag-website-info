@@ -6,11 +6,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-USE_OLLAMA = False
+USE_OLLAMA = True
 
 # Ollama Configuration
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:70b")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b")
 
 # Gemini Configuration
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -42,10 +42,15 @@ MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))  # Number of CPU threads for pa
 PARALLEL_PROCESSING = os.getenv("PARALLEL_PROCESSING", "true").lower() == "true"  # Enable parallel processing
 THREAD_COUNT = int(os.getenv("THREAD_COUNT", "0"))  # 0 = use all available CPU threads
 
-# Vector Store Configuration
-VECTORSTORE_DIR = os.getenv("VECTORSTORE_DIR", "./database")
-PERSIST_DIRECTORY = os.path.join(VECTORSTORE_DIR, "vectorstore")
-
+if USE_OLLAMA:
+    # Vector Store Configuration
+    VECTORSTORE_DIR = os.getenv("VECTORSTORE_DIR", "./vectorstore")
+    PERSIST_DIRECTORY = os.path.join(VECTORSTORE_DIR, "chroma_db")
+else: 
+    # Vector Store Configuration
+    VECTORSTORE_DIR = os.getenv("VECTORSTORE_DIR", "./database")
+    PERSIST_DIRECTORY = os.path.join(VECTORSTORE_DIR, "vectorstore")
+    
 # File Upload Configuration
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./data/uploads")
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "50"))  # MB

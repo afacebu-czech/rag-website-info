@@ -18,12 +18,12 @@ from .document_processor import DocumentProcessor
 import multiprocessing
 from .utils.prompt_templates import PromptTemplates
 from src.vectorstore_manager import VectorstoreManager
+from langchain_nomic import NomicEmbeddings
 
 USE_OLLAMA=config.USE_OLLAMA
 
 if not USE_OLLAMA:
     from langchain_google_genai import ChatGoogleGenerativeAI
-    from langchain_nomic import NomicEmbeddings
 from src.utils.logger import AppLogger
 
 logger = AppLogger(name="conversation_manager")
@@ -126,7 +126,8 @@ class RAGSystem:
                 else:
                     print("⚠️ Embeddings GPU disabled, using CPU mode")
                 
-                self.embeddings = OllamaEmbeddings(**embedding_params)
+                embedding_model = getattr(config, "EMBEDDING_MODEL", "embedding-gecko-001")
+                self.embeddings = NomicEmbeddings(model=embedding_model)
                 
                 # Log GPU/CPU configuration
                 if hasattr(config, 'NUM_GPU_LAYERS') and config.NUM_GPU_LAYERS != 0:

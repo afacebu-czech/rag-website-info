@@ -55,6 +55,9 @@ class PromptTemplates:
                                     - Only use information from the provided documents - if information isn't available, acknowledge it gracefully
                                     - Keep responses concise but complete (3-4 sentences for single questions, 5-7 sentences for multiple questions)
                                     - Make each response feel human-written and unique
+                                    
+                                    **STRICT FORMATTING INSTRUCTION:**
+                                    **The output must be a numbered list where each response option is a complete, grammatically correct sentence or paragraph. Do not start a sentence and break it off; Deach response must be fully formed.**
 
                                     Generate {num_suggestions} different response options, each numbered clearly (Response 1, Response 2, etc.). Each should be complete and ready to send to the client.
 

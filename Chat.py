@@ -327,12 +327,36 @@ def process_image(uploaded_image):
             st.info("💡 Make sure the image format is supported (PNG, JPG, JPEG, GIF, BMP)")
     else:
         st.error("⚠️ Image processing not available. Please install OCR dependencies: `pip install easyocr pillow`")
+        
+def handle_suggestion_selection():
+    st.markdown("### Suggested Responses")
+    selected_option = session_manager.get("selected_response")
+    
+    if selected_option:
+        messages = session_manager.get("messages")
+        messages.append({
+            "role": "assistant",
+            "content": selected_option
+        })
+        session_manager.set("messages", messages)
+        
+        session_manager.get("conversation_manager").add_message(
+            conversation_id=session_manager.get("current_thread_id"),
+            sender="assistant",
+            message=selected_option,
+        )
+        
+        session_manager.set("current_suggestions", None)
+        session_manager.stop_processing()
+    
+        logger.info(f"Suggestion saved: {selected_option}")
 
 def main():
     """Main application function."""
     st.title("💼 Business Knowledge Assistant")
     st.markdown("**Get instant answers from your company documents**")
     rag = initialize_rag_system()
+    print(session_manager.get("messages"))
     
     # Sidebar
     with st.sidebar:
@@ -607,7 +631,6 @@ def main():
             if rag and rag.qa_chain:
                 with st.chat_message("assistant"):
                     with st.spinner("Generating response suggestions..."):
-                        try:
                             # Debug: Show what we're processing
                             if image_processed:
                                 st.caption(f"Processing inquiry: {prompt[:100]}...")
@@ -658,6 +681,7 @@ def main():
                                             conversation_context=conversation_context,
                                             num_suggestions=num_suggestions
                                         )
+                                        session_manager.set("is_suggestion_generated", True)
                                         
                                         # Validate result
                                         if not result or not result.get("suggestions"):
@@ -672,17 +696,6 @@ def main():
                                                 }
                                             else:
                                                 raise Exception("Could not generate any response")
-                                        
-                                        # Save the answer to database
-                                        try:
-                                            session_manager.get("conversation_manager").add_message(
-                                                conversation_id=session_manager.get("current_thread_id"),
-                                                sender="assistant",
-                                                message=result["suggestions"][0] if result["suggestions"] else result.get("answer", ""),
-                                                # result["source_documents"]
-                                            )
-                                        except Exception as e:
-                                            logger.exception(f"Saving AI response failed")
                                             
                                         result["cached"] = False
                                     except Exception as e:
@@ -726,6 +739,7 @@ def main():
                                     
                                     # Validate result
                                     if not result or not result.get("suggestions"):
+                                        logger.error("No suggestions generated.")
                                         st.warning("⚠️ No suggestions generated. Trying fallback method...")
                                         # Fallback to regular query
                                         fallback_result = rag.query(prompt, conversation_context=conversation_context)
@@ -740,6 +754,7 @@ def main():
                                     
                                     result["cached"] = False
                                 except Exception as e:
+                                    logger.error("Error generating responses")
                                     st.error(f"❌ Error generating responses: {str(e)}")
                                     st.info("🔄 Trying fallback response generation...")
                                     try:
@@ -763,6 +778,7 @@ def main():
                             
                             # Validate that we have suggestions
                             if not suggestions or len(suggestions) == 0:
+                                logger.error("No response suggestions generated")
                                 st.error("❌ No response suggestions generated. This might be due to:")
                                 st.markdown("- No relevant information found in documents")
                                 st.markdown("- The inquiry could not be processed")
@@ -784,8 +800,9 @@ def main():
                                             session_manager.get("current_thread_id"),
                                             "assistant",
                                             fallback_result["answer"],
-                                            # sources=fallback_result.get("source_documents", [])
+                                            sources=fallback_result.get("source_documents", [])
                                         )
+                                        
                                         session_manager.get("messages").append({
                                             "role": "assistant",
                                             "content": fallback_result["answer"],
@@ -814,6 +831,7 @@ def main():
                                     st.rerun()
                             
                             selected_response = None
+                            selected_idx = None
                             
                             # Store suggestions in session state for selection
                             session_manager.set("current_suggestions", {
@@ -822,27 +840,53 @@ def main():
                                 "client_name": client_name,
                                 "inquiry": prompt
                             })
+                            session_manager.set("is_suggestion_generated", True)
                             
                             if selected_response and selected_idx:
                                 # Display the selected response
                                 st.markdown(f"**Selected Response {selected_idx}:**\n\n{selected_response}")
-                            else:
+                                
+                            elif session_manager.get("is_suggestion_generated"):
+                                
+                                st.radio(
+                                    "Choose a suggestion:",
+                                    options = suggestions,
+                                    key="selected_response",
+                                    on_change=handle_suggestion_selection,
+                                    index=None
+                                )
+                                print(session_manager.get("messages"))
+                                
                                 # Display each suggestion with a button
-                                for idx, suggestion in enumerate(suggestions, 1):
-                                    with st.container():
-                                        col1, col2 = st.columns([4, 1])
-                                        with col1:
-                                            st.markdown(f"**Option {idx}:**")
-                                            st.markdown(suggestion)
-                                        with col2:
-                                            if st.button("📋 Use This", key=f"select_{idx}_{len(session_manager.get('messages', []))}", use_container_width=True):
-                                                # Save the selection
-                                                session_manager.set("selected_response_idx", idx)
-                                                session_manager.set("selected_response", suggestion)
-                                                # Persist the selection for messages
-                                                st.rerun()
-                                    if idx < len(suggestions):
-                                        st.divider()
+                                # for idx, suggestion in enumerate(suggestions, 1):
+                                #     container = st.container()
+                                #     with container:
+                                #         suggestion_cols = st.columns([4, 1])
+                                #         with suggestion_cols[0]:
+                                #             st.markdown(f"**Option {idx}:**")
+                                #             st.markdown(suggestion)
+                                #         with suggestion_cols[1]:
+                                #             try:
+                                #                 button_key = f"use_suggestion_{idx}"
+                                #                 if st.button("📋 Use This", key=button_key, use_container_width=True):
+                                #                     # Save the selection
+                                #                     session_manager.set("selected_response_idx", idx)
+                                #                     session_manager.set("selected_response", suggestion)
+                                #                     messages = session_manager.get("messages")
+                                #                     messages.append({
+                                #                         "role": "assistant",
+                                #                         "content": suggestion,
+                                #                         "sources": result["source_documents"]
+                                #                     })
+                                #                     session_manager.set("messages", messages)
+                                #                     logger.info(f"Option {session_manager.get("idx")} selected: {session_manager.get("selected_response")}")
+                                #                     logger.info(f"Message {messages[-1]} stored successfully!")
+                                #                     # Persist the selection for messages
+                                #                     st.rerun()
+                                #             except Exception as e:
+                                #                 logger.error(f"Error selecting option: {e}")
+                                #     if idx < len(suggestions):
+                                #         st.divider()
                             
                             # Add regenerate button at the bottom
                             st.markdown("---")
@@ -852,83 +896,83 @@ def main():
                                     session_manager.set("regenerate_response", True)
                                     st.rerun()
                             
-                            # Check if a response was selected (from previous interaction)
-                            selected_response = session_manager.get("selected_response")
-                            selected_idx = session_manager.get("selected_response_idx")
+                        #     # Check if a response was selected (from previous interaction)
+                        #     selected_response = session_manager.get("selected_response")
+                        #     selected_idx = session_manager.get("selected_response_idx")
                             
-                            if selected_response and selected_idx:
+                        #     if selected_response and selected_idx:
                                 
-                                # Get stored suggestions data
-                                stored_data = session_manager.get("current_suggestions", {})
+                        #         # Get stored suggestions data
+                        #         stored_data = session_manager.get("current_suggestions", {})
                                 
-                                # Add selected response to conversation
-                                session_manager.get("conversation_manager").add_message(
-                                    session_manager.get("current_thread_id"),
-                                    "assistant",
-                                    selected_response,
-                                    # sources=stored_data.get("sources", result["source_documents"])
-                                )
+                        #         # Add selected response to conversation
+                        #         session_manager.get("conversation_manager").add_message(
+                        #             session_manager.get("current_thread_id"),
+                        #             "assistant",
+                        #             selected_response,
+                        #             # sources=stored_data.get("sources", result["source_documents"])
+                        #         )
                                 
-                                messages = session_manager.get("messages") or []
-                                messages.append({
-                                    "role": "assistant",
-                                    "content": f"**Selected Response {selected_idx}:**\n\n{selected_response}",
-                                    "sources": stored_data.get("sources", result["source_documents"]),
-                                    "suggestions": stored_data.get("suggestions", suggestions),
-                                    "selected": selected_idx
-                                })
-                                session_manager.set("messages", messages)
+                        #         messages = session_manager.get("messages") or []
+                        #         messages.append({
+                        #             "role": "assistant",
+                        #             "content": f"**Selected Response {selected_idx}:**\n\n{selected_response}",
+                        #             "sources": stored_data.get("sources", result["source_documents"]),
+                        #             "suggestions": stored_data.get("suggestions", suggestions),
+                        #             "selected": selected_idx
+                        #         })
+                        #         session_manager.set("messages", messages)
                                 
-                                # Clear selection state
-                                session_manager.clear("selected_response")
-                                session_manager.clear("selected_response_idx")
-                                session_manager.clear("current_suggestions")
+                        #         # Clear selection state
+                        #         session_manager.clear("selected_response")
+                        #         session_manager.clear("selected_response_idx")
+                        #         session_manager.clear("current_suggestions")
                                 
-                                st.success(f"✅ Response {selected_idx} selected and saved!")
-                                logger.info(f"Response {selected_idx} selected and saved!")
-                                st.rerun()
+                        #         st.success(f"✅ Response {selected_idx} selected and saved!")
+                        #         logger.info(f"Response {selected_idx} selected and saved!")
+                        #         st.rerun()
                             
-                            # Show source documents
-                            if result["source_documents"]:
-                                with st.expander("📄 Reference Documents"):
-                                    for i, source in enumerate(result["source_documents"], 1):
-                                        doc_name = source.get("source", "Document")
-                                        doc_name = doc_name.replace("_", " ").replace("-", " ").title()
-                                        st.markdown(f"**{doc_name}**")
-                                        if source.get("content"):
-                                            preview = source["content"][:200] + "..." if len(source["content"]) > 200 else source["content"]
-                                            st.caption(preview)
+                        #     # Show source documents
+                        #     if result["source_documents"]:
+                        #         with st.expander("📄 Reference Documents"):
+                        #             for i, source in enumerate(result["source_documents"], 1):
+                        #                 doc_name = source.get("source", "Document")
+                        #                 doc_name = doc_name.replace("_", " ").replace("-", " ").title()
+                        #                 st.markdown(f"**{doc_name}**")
+                        #                 if source.get("content"):
+                        #                     preview = source["content"][:200] + "..." if len(source["content"]) > 200 else source["content"]
+                        #                     st.caption(preview)
                             
                             
-                        except Exception as e:
-                            error_msg = f"Error generating suggestions: {str(e)}"
-                            st.error(error_msg)
-                            # Fallback to regular query
-                            try:
-                                conversation_context = session_manager.get("conversation_manager").get_thread_context(
-                                    session_manager.get("current_thread_id")
-                                )
-                                result = rag.query(prompt, conversation_context=conversation_context)
-                                st.markdown(result["answer"])
+                        # except Exception as e:
+                        #     error_msg = f"Error generating suggestions: {str(e)}"
+                        #     st.error(error_msg)
+                        #     # Fallback to regular query
+                        #     try:
+                        #         conversation_context = session_manager.get("conversation_manager").get_thread_context(
+                        #             session_manager.get("current_thread_id")
+                        #         )
+                        #         result = rag.query(prompt, conversation_context=conversation_context)
+                        #         st.markdown(result["answer"])
                                 
-                                session_manager.get("conversation_manager").add_message(
-                                    session_manager.get("current_thread_id"),
-                                    "assistant",
-                                    result["answer"],
-                                    sources=result["source_documents"]
-                                )
+                        #         session_manager.get("conversation_manager").add_message(
+                        #             session_manager.get("current_thread_id"),
+                        #             "assistant",
+                        #             result["answer"],
+                        #             sources=result["source_documents"]
+                        #         )
                                 
-                                session_manager.get("messages").append({
-                                    "role": "assistant",
-                                    "content": result["answer"],
-                                    "sources": result["source_documents"]
-                                })
-                            except Exception as e2:
-                                st.error(f"Error: {str(e2)}")
-                                session_manager.get("messages").append({
-                                    "role": "assistant",
-                                    "content": f"Error: {str(e2)}"
-                                })
+                        #         session_manager.get("messages").append({
+                        #             "role": "assistant",
+                        #             "content": result["answer"],
+                        #             "sources": result["source_documents"]
+                        #         })
+                        #     except Exception as e2:
+                        #         st.error(f"Error: {str(e2)}")
+                        #         session_manager.get("messages").append({
+                        #             "role": "assistant",
+                        #             "content": f"Error: {str(e2)}"
+                        #         })
             else:
                 st.error("RAG system not ready. Please check your configuration.")
 
