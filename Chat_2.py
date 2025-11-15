@@ -352,7 +352,256 @@ def handle_suggestion_selection():
     
         logger.info(f"Suggestion saved: {selected_option}")
         st.rerun()
+        
+def render_chat_tab(rag):
+    """Renders the Chat Interface tab UI, including the history, and handles input/processing."""
+    
+    # Check if documents are processed/vectorstore is read
+    if not session_manager.get("documents_processed"):
+        if rag:
+            vs_info = rag.get_vectorstore_info()
+            if vs_info["status"] != "initialized" or vs_info.get("document_count", 0) == 0:
+                st.warning("Pleas upload and process documents first in the 'Upload Documents' section.")
+                return
+            
+    st.header("Ask Questions")
+    st.caption("Get quick, clear answers from your uploaded documents")
+    
+    # Thread management UI
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        thread_topic = "New conversation"
+        if session_manager.get("current_thread_id"):
+            threads = session_manager.get("conversation_manager").get_all_conversations()
+            for t in threads:
+                if t['thread_id'] == session_manager.get("current_thread_id"):
+                    thread_topic = t.get('topic', 'Current conversation')
+                    thread_topic = thread_topic.replace(("\n", " "))
+                    if len(thread_topic > 40):
+                        thread_topic = thread_topic[:40] + "..."
+                    break
+        st.caption(f"Thread: {thread_topic}")
+        
+    # --- Display Chat History ---
+    # display_chat_messages(session_manager.get("messages"))
 
+    # --- Display Suggestions (if any) ---
+    current_suggestions = session_manager.get("current_suggestions")
+    if current_suggestions:
+        # display_suggestions(current_suggestions, rag)
+        return # Stop processing to wait for selection/regeneration
+    
+    # --- Chat Input ---
+    prompt = None
+    uploaded_image = None
+    user_input = None
+    
+    if MULTIMODAL_AVAILABLE:
+        user_input = multimodal_chat_input(
+            placeholder="Type a message or paste an image (Ctrl+V)...",
+            accepted_file_types=["png", "jpg", "jpeg", "gif", "bmp", "webp"],
+            enable_voice_input=False,
+            max_file_size_mb=10,
+            key="multimodal_chat_input"
+        )
+        if user_input:
+            uploaded_image, prompt = input_handler(user_input)
+        
+    else:
+        # Fallback to native Streamlit chat_input with files
+        try:
+            user_input = st.chat_input(
+                "Type a message or attach an image...",
+                key="main_chat_input",
+                accept_file=True,
+                file_type=["png", "jpg", "jpeg", "gif", "bmp"]
+            )
+            
+            if user_input:
+                if hasattr(user_input, 'files') and user_input.files:
+                    uploaded_image = user_input.files[0]
+                    session_manager.set("pasted_image", True)
+                    prompt = user_input.text if hasattr(user_input, 'text') and user_input.text else ""
+                elif hasattr(user_input, 'text') and user_input.text:
+                    prompt = user_input.text
+                    session_manager.set("pasted_image", False)
+                elif isinstance(user_input, str):
+                    prmpt = user_input
+                    session_manager.set("pasted_image", False)
+        except TypeError:
+            # Fallback for older Streamlit versions
+            col1, col2 = st.columns([5, 1])
+            with col1:
+                if not session_manager.get("is_processing"):
+                    prompt = st.chat_input("Ask a question...", key="main_chat_input")
+                else:
+                    st.chat_input("Processing...", key="disabled_input", disabled=True)
+            with col2:
+                uploaded_image = st.file_uploader(
+                    "📷",
+                    type=["png", "jpg", "jpeg", "gif", "bmp"],
+                    help="Paste (Ctrl+V) or upload",
+                    key="inquiry_image_fallback",
+                    label_visibility="collapsed"
+                )
+                
+    # Start processing only if there is input
+    if (uploaded_image is not None or (prompt and len(prompt.strip()) > 0)):
+        session_manager.start_processing()
+        # handle_chat_input( rag, prompt, uploaded_image)
+
+def handle_chat_input(rag, prompt, uploaded_image):
+    """Core logic for processing image, handling prompt, generating response suggestions, and rerunning."""
+    
+    # Image Processing
+    if uploaded_image is not None:
+        process_image(uploaded_image)
+        # Rerun is triggered inside process_image if successful
+        return
+    
+    # Handle Pending Inquiry from successful image processing
+    client_name = None
+    image_processed = False
+    
+    if session_manager.get("pending_inquiry"):
+        inquiry_data = session_manager.get("pending_inquiry")
+        prompt = inquiry_data.get("prompt", "").strip()
+        client_name = inquiry_data.get("client_name")
+        extracted_text = inquiry_data.get("extracted_text", "").strip()
+        image_processed = True
+        session_manager.clear("pending_inquiry") # Clear after reading
+        
+        if not prompt or len(prompt.strip()) < 5:
+            if extracted_text and len(extracted_text) > 10:
+                prompt = extracted_text
+            elif not prompt:
+                st.error("Could not extract a valid inquiry from the image.")
+                session_manager.stop_processing()
+                return
+            
+    # Final Prompt Check and User Message Display
+    if not prompt or len(prompt.strip()) < 3:
+        session_manager.stop_processing()
+        st.warning("No valid question found. Please try again.")
+        return
+    
+    if not session_manager.get("current_thread_id"):
+        session_manager.set("current_thread_id", session_manager.get("conversation_manager").create_conversation_thread())
+        
+    user_message = prompt
+    if client_name:
+        user_message = f"Client: {client_name}\n\nInquiry: {prompt}"
+        
+    session_manager.get("conversation_manager").add_message(session_manager.get("current_thread_id"), "user", user_message)
+    
+    display_message = prompt
+    if client_name:
+        display_message = f"**{client_name}** asks: {prompt}"
+        
+    messages = session_manager.get("messages")
+    messages.append({
+        "role": "user", "content": display_message
+    })
+    session_manager.set("messages", messages)
+    
+    # Display the user message immediately
+    with st.chat_message("user"):
+        if client_name:
+            st.markdown(f"**Client:** {client_name}")
+        st.markdown(prompt)
+    
+    # Generate Response Suggestions
+    if rag and rag.qa_chain:
+        with st.chat_message("assistant"):
+            with st.spinner("Generating response suggestions..."):
+                
+                regenerate_requested = session_manager.get("regenerate_response", False)
+                if regenerate_requested:
+                    session_manager.set("regenerate_response", False)
+                    st.info("Regenerating fresh response (bypassing cache)...")
+                    
+                conversation_context = session_manager.get("conversation_manager").get_thread_context(
+                    session_manager.get("current_thread_id")
+                )
+                num_suggestions = 2
+                result = None
+                
+                try:
+                    # Attempt primary generation
+                    if image_processed:
+                        st.info("Generating personalized response suggestions...")
+                        
+                    result = rag.generate_response_suggestions(
+                        question=prompt,
+                        client_name=client_name,
+                        conversation_context=conversation_context,
+                        num_suggestions=num_suggestions
+                    )
+                    
+                    if not result or not result.get("suggestions"):
+                        raise Exception("No suggestions generated.")
+                except Exception as e:
+                    logger.error(f"Error during primary generation: {str(e)}")
+                    st.warning("Primary generation failed. Trying fallback method...")
+                    
+                    try:
+                        # Fallback to regular query
+                        fallback_result = rag.query(prompt, conversation_context=conversation_context)
+                        if fallback_result.get("answer"):
+                            result = {
+                                "suggestions": [fallback_result["answer"]],
+                                "source_documents": fallback_result.get("source_documents", []),
+                                "cached": False
+                            }
+                        else:
+                            raise Exception("Fallback also failed.")
+                    except Exception as e2:
+                        st.error(f"Fallback also failed: {str(e2)}")
+                        session_manager.stop_processing()
+                        st.stop()
+                        return
+                    
+                # Store and Display Suggestions
+                session_manager.set("current_suggestions", {
+                    "suggestions": result.get("suggestions", []),
+                    "sources": result.get("source_documents", []),
+                    "client_name": client_name,
+                    "inquiry": prompt
+                })
+                
+                session_manager.stop_processing()
+                st.rerun() # Rerun to display suggestions and update the history
+                
+    else:
+        st.error("RAG systems not ready. Please check you configuration.")
+        session_manager.stop_processing()
+        
+def display_suggestions(current_suggestions, rag):
+    """Displays the response suggestions and selection mechanism."""
+    
+    suggestions = current_suggestions["suggestions"]
+    client_name = current_suggestions.get("client_name")
+    
+    st.markdown("### Suggested Responses")
+    
+    # Regenerate button
+    regen_col1, regen_col2 = st.columns([3, 1])
+    with regen_col1:
+        if client_name:
+            st.caption(f"Choose a response to send to **{client_name}**:")
+        else:
+            st.caption("Choose a response to send to the client:")
+    with regen_col2:
+        if st.button("Regenerate", key="regenerate_top", use_container_width="True", help="Generate new response variations"):
+            session_manager.set("regenerate_response", True)
+            session_manager.clear("current_suggestions")
+            session_manager.clear("selected_response")
+            st.rerun()
+            
+    
+                        
+    
+    
 def main():
     """Main application function."""
     st.title("💼 Business Knowledge Assistant")
