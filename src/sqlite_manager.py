@@ -1,8 +1,11 @@
 import sqlite3
 from datetime import datetime
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union, Literal
 import uuid
 import src.config as config
+# import config as config
+import bcrypt
 
 if config.USE_OLLAMA:
     DB_PATH = "./vectorstore/sql_lite/rag_chatbot.db"
@@ -265,16 +268,104 @@ class SQLiteManager:
             )
             return next(iter(result.values())) if result else 0
             
-    # --- User Helpers
+    # --- User Helpers ---
+    def get_user_credentials(self, username: str, password: str) -> Optional[Dict]:
+        """
+        Retrieves the user's stored hash by username and verifies the provided password using bcrypt.
+        """
+        if not username or not password:
+            return None
+        
+        # Retrieve the user record, specifically the ID and the hash
+        user_record = self.select(
+            "users",
+            where="username = ?",
+            params=(username,),
+            columns="id, username, password_hash",
+            fetch="one"
+        )
+        
+        # Check if a user was found
+        if user_record:
+            stored_hash = user_record.get("password_hash")
+            
+            if isinstance(stored_hash, str):
+                stored_hash = stored_hash.encode('utf-8')
+            
+            provided_password_bytes = password.encode('utf-8')
+            
+            if bcrypt.checkpw(provided_password_bytes, stored_hash):
+                user_record.pop('password_hash', None)
+                return user_record
+            
+        return None
+    
+    def hash_password(self, password: str) -> str:
+        """
+        Hashes a password using bcrypt and returns the result as a string for a database storage.
+        """
+        # Encode the plaintext password to bytes (required by bcrypt)
+        password_bytes = password.encode('utf-8')
+        
+        # Generate a salt and hash the password in one step
+        hashed_bytes = bcrypt.hashpw(password_bytes, bcrypt.gensalt(rounds=12))
+        
+        return hashed_bytes.decode('utf-8')
+    
+    def create_new_user(self, username: str, password: str) -> Optional[Dict]:
+        """
+        Hashes the password and inserts a new user record into the 'users' table.
+        Return the inserted user data (if applicable) or None on failure.
+        """
+        if not username or not password:
+            return None
+        
+        # Check if the username already exists (Optional, but highly recommended)
+        existing_user = self.select(
+            "users",
+            where="username = ?",
+            params=(username,),
+            columns="id",
+            fetch="one"
+        )
+        if existing_user:
+            print(f"Error: User '{username}' already exists.")
+            return None
+        
+        # Hash the password
+        password_hash = self.hash_password(password)
+        
+        # Get the current timestamp (optional, but good practice for use accounts)
+        created_at = int(time.time())
+        user_id = f"USR_{uuid.uuid4().hex[:12]}"
+        
+        try:
+            new_user_id = self.insert(
+                "users",
+                data={
+                    "id": user_id,
+                    "username": username,
+                    "password_hash": password_hash,
+                    "created_at": created_at
+                }
+            )
+            
+            # Return the newly created user's basic info
+            return {"id": user_id, "username": username}
+        except Exception as e:
+            print(f"Database insertion failed: {e}")
+            return None        
+        
+    
         
 def scripts():
     sql = SQLiteManager()
 
-    num_messages = sql.get_count_message_of_conversation(conversation_id="CNV_c0e80ac0b99f")
-    print(num_messages)
+    status = sql.create_new_user("cenixuser", "cenixpassword")
+    print(status)
 
 def main():
-    scripts()
+    pass
     
 if __name__ == "__main__":
     main()

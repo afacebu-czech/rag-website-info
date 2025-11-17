@@ -7,7 +7,6 @@ class SessionManager:
     # --- INITIALIZATION ---
     
     def __init__(self, user_id: str=None):
-        self.user_id = user_id
         self._initialize_sessions()
         
     def _initialize_sessions(self):
@@ -16,7 +15,10 @@ class SessionManager:
             return
         
         if "user_id" not in st.session_state:
-            st.session_state.user_id = self.user_id
+            st.session_state.user_id = None
+            
+        if "current_user" not in st.session_state:
+            st.session_state.current_user = None
         
         if "rag_system" not in st.session_state:
             st.session_state.rag_system = None
@@ -76,6 +78,9 @@ class SessionManager:
         
         if "current_tab" not in st.session_state:
             st.session_state.current_tab = "tab1"
+        
+        if "authenticated" not in st.session_state:
+            st.session_state['authenticated'] = False
         
         st.session_state["_initialized"] = True
     # --- GETTER & SETTER ---

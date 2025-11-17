@@ -19,6 +19,11 @@ from src.utils.logger import AppLogger
 
 logger = AppLogger()
 
+VALID_USERNAME = "user"
+VALID_PASSWORD = "password123"
+
+db = SQLiteManager()
+
 # Set environment variable to avoid OpenMP warning (needed for EasyOCR/numpy)
 os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
 
@@ -40,13 +45,42 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize sqlite db
-db = SQLiteManager()
-
 # Initialize session state
 if "session_manager" not in st.session_state:
     st.session_state["session_manager"] = SessionManager(user_id="USR-123456")
 session_manager = st.session_state["session_manager"]
+
+def check_password(username, password):
+    """Simple function to check credentials."""
+    return username == VALID_USERNAME and password == VALID_PASSWORD
+
+def login():
+    """Renders the login form in the sidebar."""
+    st.header("User Login")
+    
+    if not session_manager.get("authenticated"):
+        with st.form("login_form"):
+            st.text_input("Username", key="username")
+            st.text_input("Password", type="password", key="password")
+            submitted = st.form_submit_button("Login")
+            
+            if submitted:
+                status = db.get_user_credentials(username=session_manager.get("username"), password=session_manager.get("password"))
+                if status:
+                    session_manager.set("authenticated", True)
+                    session_manager.set("user_id", status.get("id"))
+                    session_manager.set("current_user", status.get("username"))
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+    else:
+        # Display the logout button when authenticated
+        st.write(f"Welcome, **{VALID_USERNAME}**!")
+        if st.button("Logout"):
+            session_manager.set("authenticated", False)
+            st.info("Logged out.")
+            st.rerun()
+    
 
 def initialize_rag_system():
     """Initialize the RAG system."""
@@ -711,21 +745,34 @@ def display_suggestions(current_suggestions, rag):
     
 def main():
     """Main application function."""
-    st.title("💼 Business Knowledge Assistant")
+    title_col, logout_col = st.columns([16, 1])
+    with title_col:
+        st.title("💼 Business Knowledge Assistant")
+        
     st.markdown("**Get instant answers from your company documents**")
-    rag = initialize_rag_system()
     
-    # Sidebar rendering
-    render_sidebar()
     
-    # Main content tabs (Rendered consistently to avoid recreation issue)
-    tab1, tab2 = st.tabs(["Upload Documents", "Chat with Documents"])
-    
-    with tab1:
-        render_document_tab()
-    
-    with tab2:
-        render_chat_tab(rag)
+    if session_manager.get("authenticated"):
+        st.toast("Logged in successfully!", icon="✅", duration="short")
+        with logout_col:
+            if st.button("Logout"):
+                session_manager.set("authenticated", False)
+                st.rerun()
+        
+        rag = initialize_rag_system()
+        # Sidebar rendering
+        render_sidebar()
+        
+        # Main content tabs (Rendered consistently to avoid recreation issue)
+        tab1, tab2 = st.tabs(["Upload Documents", "Chat with Documents"])
+        
+        with tab1:
+            render_document_tab()
+        
+        with tab2:
+            render_chat_tab(rag)
+    else:
+        login()
 
 if __name__ == "__main__":
     main()
