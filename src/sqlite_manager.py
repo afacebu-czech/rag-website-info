@@ -312,7 +312,7 @@ class SQLiteManager:
         
         return hashed_bytes.decode('utf-8')
     
-    def create_new_user(self, username: str, password: str) -> Optional[Dict]:
+    def create_new_user(self, email: str, username: str, password: str) -> Optional[Dict]:
         """
         Hashes the password and inserts a new user record into the 'users' table.
         Return the inserted user data (if applicable) or None on failure.
@@ -346,6 +346,7 @@ class SQLiteManager:
                     "id": user_id,
                     "username": username,
                     "password_hash": password_hash,
+                    "email": email,
                     "created_at": created_at
                 }
             )

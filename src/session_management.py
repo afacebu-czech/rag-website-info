@@ -6,7 +6,7 @@ class SessionManager:
     
     # --- INITIALIZATION ---
     
-    def __init__(self, user_id: str=None):
+    def __init__(self):
         self._initialize_sessions()
         
     def _initialize_sessions(self):
@@ -111,6 +111,8 @@ class SessionManager:
     def clear_all(self):
         """Fully reset session state (except cached items)."""
         keys_to_clear = [
+            "authenticated"
+            "user_id"
             "messages",
             "documents",
             "current_thread_id",

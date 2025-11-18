@@ -81,6 +81,49 @@ def login():
             session_manager.set("authenticated", False)
             st.info("Logged out.")
             st.rerun()
+            
+def register():
+    """Renders the user registration form."""
+    with st.expander("No account yet?", expanded=False):
+        st.header("User Registration")
+        # Only show the registration form if the user is NOT authenticated
+        if not session_manager.get("authenticated"):
+            with st.form("registration_form", border=True):
+                st.text_input("Enter Work Email", key="email_reg", help="Current work email.")
+                st.text_input("Choose Username", key="username_reg", help="Must be unique.")
+                st.text_input("Set Password", type="password", key="password_reg", help="Make it strong!")
+                submitted = st.form_submit_button("Register Account", type="primary")
+
+                if submitted:
+                    # 1. Retrieve the input values
+                    username = session_manager.get("username_reg")
+                    password = session_manager.get("password_reg")
+                    email = session_manager.get("email_reg")
+                    
+                    # 2. Basic Input Validation
+                    if not username or not password or not email:
+                        st.error("Please enter a username, an email and a password.")
+                        return
+
+                    # 3. Attempt to register the new user
+                    result = db.create_new_user(email=email, username=username, password=password)
+
+                    if result:
+                        st.success(f"Account for **{username}** created successfully! You can now log in.")
+                        
+                        # Optional: Automatically log the user in after successful registration
+                        session_manager.set("authenticated", True)
+                        session_manager.set("user_id", result.get("id"))
+                        session_manager.set("current_user", result.get("username"))
+                        st.rerun() 
+                        
+                    else:
+                        # Registration failed (e.g., username already exists)
+                        st.error(f"Registration failed: {result}")
+        else:
+            # Display message if already logged in
+            current_user = session_manager.get("current_user", "User")
+            st.info(f"You are already logged in as **{current_user}**. Please log out before registering a new account.")
     
 
 def initialize_rag_system():
@@ -463,9 +506,10 @@ def render_document_tab():
 
 def display_chat_messages(messages):
     """Displays all messages in the chat history."""
-    for message in messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    if messages:
+        for message in messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
         
 def render_chat_tab(rag):
     """Renders the Chat Interface tab UI, including the history, and handles input/processing."""
@@ -758,7 +802,7 @@ def main():
         with logout_col:
             if st.button("Logout"):
                 session_manager.set("authenticated", False)
-                session_manager.set("user_id", None)
+                session_manager.clear_all()
                 session_manager.get("conversation_manager").disconnect_user()
                 st.rerun()
         
@@ -775,7 +819,11 @@ def main():
         with tab2:
             render_chat_tab(rag)
     else:
-        login()
+        login_col, register_col = st.columns([2, 2])
+        with login_col:
+            login()
+        with register_col:
+            register()
 
 if __name__ == "__main__":
     main()
