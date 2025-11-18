@@ -210,7 +210,7 @@ class SQLiteManager:
             order_by="position ASC"
         )
         
-    def get_all_conversations_of_user(self, user_id: Optional[str] = None) -> List[Dict]:
+    def get_all_conversations_of_user(self, user_id: str = None) -> List[Dict]:
         """
         Get all conversations from SQLite with metadata.
         Each thread includes: id, title/topic, created_at, message_count.

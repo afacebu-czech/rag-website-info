@@ -47,7 +47,7 @@ st.set_page_config(
 
 # Initialize session state
 if "session_manager" not in st.session_state:
-    st.session_state["session_manager"] = SessionManager(user_id="USR-123456")
+    st.session_state["session_manager"] = SessionManager(user_id=None)
 session_manager = st.session_state["session_manager"]
 
 def check_password(username, password):
@@ -59,7 +59,7 @@ def login():
     st.header("User Login")
     
     if not session_manager.get("authenticated"):
-        with st.form("login_form"):
+        with st.form("login_form", width=500, border=False):
             st.text_input("Username", key="username")
             st.text_input("Password", type="password", key="password")
             submitted = st.form_submit_button("Login")
@@ -70,6 +70,7 @@ def login():
                     session_manager.set("authenticated", True)
                     session_manager.set("user_id", status.get("id"))
                     session_manager.set("current_user", status.get("username"))
+                    session_manager.get("conversation_manager").set_user(status.get("id"))
                     st.rerun()
                 else:
                     st.error("Invalid username or password.")
@@ -396,7 +397,7 @@ def render_sidebar():
             st.rerun()
             
         st.subheader("Conversation Threads")
-        threads = session_manager.get("conversation_manager").get_all_conversations()
+        threads = session_manager.get("conversation_manager").get_all_conversations(session_manager.get("user_id"))
         if threads:
             thread_options = {}
             for t in threads:
@@ -485,7 +486,7 @@ def render_chat_tab(rag):
     with col1:
         thread_topic = "New conversation"
         if session_manager.get("current_thread_id"):
-            threads = session_manager.get("conversation_manager").get_all_conversations()
+            threads = session_manager.get("conversation_manager").get_all_conversations(session_manager.get("user_id"))
             for t in threads:
                 if t['thread_id'] == session_manager.get("current_thread_id"):
                     thread_topic = t.get('topic', 'Current conversation')
@@ -757,6 +758,8 @@ def main():
         with logout_col:
             if st.button("Logout"):
                 session_manager.set("authenticated", False)
+                session_manager.set("user_id", None)
+                session_manager.get("conversation_manager").disconnect_user()
                 st.rerun()
         
         rag = initialize_rag_system()

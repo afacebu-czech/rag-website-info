@@ -33,7 +33,7 @@ class SessionManager:
             st.session_state.db = SQLiteManager()
 
         if "conversation_manager" not in st.session_state:
-            st.session_state.conversation_manager = ConversationManager(db=st.session_state.db, user_id=st.session_state.user_id)
+            st.session_state.conversation_manager = ConversationManager(db=st.session_state.db)
 
         if "current_thread_id" not in st.session_state:
             st.session_state.current_thread_id = None
