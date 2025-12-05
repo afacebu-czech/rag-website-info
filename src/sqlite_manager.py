@@ -4,11 +4,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union, Literal
 import uuid
 import src.config as config
 
-if config.USE_OLLAMA:
-    DB_PATH = "./vectorstore/sql_lite/rag_chatbot.db"
-else:
-    DB_PATH = "./database/structured/rag_chatbot.db"
-
 class SQLiteManager:
     """
     General-purpose SQLite manager that can:
@@ -17,7 +12,7 @@ class SQLiteManager:
     - Provide conversation-specific helper methods (for chat history)
     """
     
-    def __init__(self, db_path: str=DB_PATH):
+    def __init__(self, db_path: str=config.DB_PATH):
         self.db_path = db_path
         self._init_default_schema()
         

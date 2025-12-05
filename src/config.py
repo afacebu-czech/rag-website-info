@@ -42,14 +42,19 @@ MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))  # Number of CPU threads for pa
 PARALLEL_PROCESSING = os.getenv("PARALLEL_PROCESSING", "true").lower() == "true"  # Enable parallel processing
 THREAD_COUNT = int(os.getenv("THREAD_COUNT", "0"))  # 0 = use all available CPU threads
 
+# Vector Store Configuration
 if USE_OLLAMA:
-    # Vector Store Configuration
-    VECTORSTORE_DIR = os.getenv("VECTORSTORE_DIR", "./vectorstore")
-    PERSIST_DIRECTORY = os.path.join(VECTORSTORE_DIR, "chroma_db")
-else: 
-    # Vector Store Configuration
     VECTORSTORE_DIR = os.getenv("VECTORSTORE_DIR", "./database")
     PERSIST_DIRECTORY = os.path.join(VECTORSTORE_DIR, "vectorstore")
+else: 
+    VECTORSTORE_DIR = os.getenv("VECTORSTORE_DIR", "./database")
+    PERSIST_DIRECTORY = os.path.join(VECTORSTORE_DIR, "vectorstore")
+
+# SQLite Configuration
+if USE_OLLAMA:
+    DB_PATH = "./database/structured/rag_chatbot.db"
+else:
+    DB_PATH = "./database/structured/rag_chatbot.db"
     
 # File Upload Configuration
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./data/uploads")
