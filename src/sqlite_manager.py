@@ -6,12 +6,9 @@ import uuid
 import src.config as config
 # import config as config
 import bcrypt
+from src.utils.logger import AppLogger
 
-if config.USE_OLLAMA:
-    DB_PATH = "./vectorstore/sql_lite/rag_chatbot.db"
-else:
-    DB_PATH = "./database/structured/rag_chatbot.db"
-
+logger = AppLogger(name="sqlite_management")
 class SQLiteManager:
     """
     General-purpose SQLite manager that can:
@@ -20,7 +17,7 @@ class SQLiteManager:
     - Provide conversation-specific helper methods (for chat history)
     """
     
-    def __init__(self, db_path: str=DB_PATH):
+    def __init__(self, db_path: str=config.DB_PATH):
         self.db_path = db_path
         self._init_default_schema()
         
@@ -131,6 +128,14 @@ class SQLiteManager:
                                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                                     FOREIGN KEY(conversation_id) REFERENCES conversations (id)
                                 );
+                                
+                                CREATE TABLE IF NOT EXISTS sessions (
+                                    user_id TEXT NOT NULL,
+                                    session_token TEXT PRIMARY KEY,
+                                    created_at INTEGER NOT NULL,
+                                    expires_at INTEGER NOT NULL,
+                                    FOREIGN KEY(user_id) REFERENCES users (id)
+                                )
                                 """)
             conn.commit()
             
@@ -158,8 +163,12 @@ class SQLiteManager:
         """
         query = f"DELETE FROM {table}"
         self.execute(query)
+        
+    def drop_table(self, table: str) -> None:
+        query = f"DROP TABLE {table}"
+        self.execute(query)
             
-    # --- Chat Conversation Helpers ---
+# ==================== CONVERSATION ====================
     def create_conversation(
         self,
         conversation_id: str,
@@ -267,8 +276,8 @@ class SQLiteManager:
                 fetch="one"
             )
             return next(iter(result.values())) if result else 0
-            
-    # --- User Helpers ---
+
+# ==================== USERS ====================
     def get_user_credentials(self, username: str, password: str) -> Optional[Dict]:
         """
         Retrieves the user's stored hash by username and verifies the provided password using bcrypt.
@@ -300,52 +309,34 @@ class SQLiteManager:
             
         return None
     
-    def hash_password(self, password: str) -> str:
-        """
-        Hashes a password using bcrypt and returns the result as a string for a database storage.
-        """
-        # Encode the plaintext password to bytes (required by bcrypt)
-        password_bytes = password.encode('utf-8')
-        
-        # Generate a salt and hash the password in one step
-        hashed_bytes = bcrypt.hashpw(password_bytes, bcrypt.gensalt(rounds=12))
-        
-        return hashed_bytes.decode('utf-8')
+    def find_user(self, username: str):
+        row = self.select(
+            'users',
+            where="username = ?",
+            params=(username,),
+            columns="id, username, password_hash",
+            fetch='one'
+        )
+        if row:
+            return row
+        return None
     
-    def create_new_user(self, email: str, username: str, password: str) -> Optional[Dict]:
+    def create_new_user(self, email: str, username: str, hash_password: bytes) -> Optional[Dict]:
         """
         Hashes the password and inserts a new user record into the 'users' table.
         Return the inserted user data (if applicable) or None on failure.
         """
-        if not username or not password:
-            return None
-        
-        # Check if the username already exists (Optional, but highly recommended)
-        existing_user = self.select(
-            "users",
-            where="username = ?",
-            params=(username,),
-            columns="id",
-            fetch="one"
-        )
-        if existing_user:
-            print(f"Error: User '{username}' already exists.")
-            return None
-        
-        # Hash the password
-        password_hash = self.hash_password(password)
-        
         # Get the current timestamp (optional, but good practice for use accounts)
         created_at = int(time.time())
         user_id = f"USR_{uuid.uuid4().hex[:12]}"
         
         try:
-            new_user_id = self.insert(
+            self.insert(
                 "users",
                 data={
                     "id": user_id,
                     "username": username,
-                    "password_hash": password_hash,
+                    "password_hash": hash_password,
                     "email": email,
                     "created_at": created_at
                 }
@@ -357,16 +348,59 @@ class SQLiteManager:
             print(f"Database insertion failed: {e}")
             return None        
         
-    
+# ==================== SESSION ====================
+    def create_session(self, user_id: str) -> str:
+        token = str(uuid.uuid4())
+        now = int(time.time())
+        expires = now + config.SESSION_TIMEOUT
+        self.insert(
+            'sessions',
+            data={
+                'session_token': token,
+                'user_id': user_id,
+                'created_at': now,
+                'expires_at': expires
+            }
+        )
+        return token
         
+    def update_session_expiry(self, token: str, new_expires):
+        self.update(
+            'sessions',
+            data={
+                'expires_at': new_expires
+            },
+            where='session_token = ?',
+            params=(token,)
+        )
+    
+    def find_valid_session_by_token(self, token: str) -> Dict:
+        row = self.select(
+            'sessions',
+            where="session_token = ?",
+            params=(token,),
+            columns="user_id, expires_at",
+            fetch='one'
+        )
+        return row
+        
+    def delete_session(self, token: str):
+        self.delete_row(
+            'sessions',
+            condition='session_token = ?',
+            params = (token,)
+        )
+        
+        
+# --------------- TEST ----------------
+
 def scripts():
     sql = SQLiteManager()
-
-    status = sql.create_new_user("cenixuser", "cenixpassword")
-    print(status)
+    # sql.drop_table("sessions")
+    sql.delete_session("3a6ae4d6-e86f-413d-bcaf-8f0af991b0c4")
 
 def main():
-    pass
+    scripts()
     
 if __name__ == "__main__":
     main()

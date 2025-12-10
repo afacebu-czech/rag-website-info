@@ -5,7 +5,9 @@ import streamlit as st
 import os
 import tempfile
 import uuid
+import time
 import multiprocessing
+import json
 from pathlib import Path
 from src.rag_system import RAGSystem
 from src.document_processor import DocumentProcessor
@@ -13,11 +15,14 @@ from src.conversation_management import ConversationManager
 from PIL import Image
 import src.config as config
 from src.session_management import SessionManager
-from typing import Dict
+from typing import Dict, Any
 from src.sqlite_manager import SQLiteManager
 from src.utils.logger import AppLogger
+from src.utils.helper_functions import HelperFunctions
+from streamlit_cookies_manager import EncryptedCookieManager
 
 logger = AppLogger()
+helper_functions = HelperFunctions()
 
 VALID_USERNAME = "user"
 VALID_PASSWORD = "password123"
@@ -38,6 +43,9 @@ except ImportError:
     MULTIMODAL_AVAILABLE = False
     multimodal_chat_input = None
 
+
+####################################################################################################################
+
 # Page configuration
 st.set_page_config(
     page_title=config.PAGE_TITLE,
@@ -45,9 +53,17 @@ st.set_page_config(
     layout="wide"
 )
 
+cookies = EncryptedCookieManager(
+    prefix="business-knowledge-assistant",
+    password="{EjNUjML)BR)^8#O"
+)
+
+if not cookies.ready():
+    st.stop()
+
 # Initialize session state
 if "session_manager" not in st.session_state:
-    st.session_state["session_manager"] = SessionManager(user_id=None)
+    st.session_state["session_manager"] = SessionManager(cookies)
 session_manager = st.session_state["session_manager"]
 
 def check_password(username, password):
@@ -67,10 +83,7 @@ def login():
             if submitted:
                 status = db.get_user_credentials(username=session_manager.get("username"), password=session_manager.get("password"))
                 if status:
-                    session_manager.set("authenticated", True)
-                    session_manager.set("user_id", status.get("id"))
-                    session_manager.set("current_user", status.get("username"))
-                    session_manager.get("conversation_manager").set_user(status.get("id"))
+                    session_manager.logged_in(status)
                     st.rerun()
                 else:
                     st.error("Invalid username or password.")
@@ -88,7 +101,7 @@ def register():
         st.header("User Registration")
         # Only show the registration form if the user is NOT authenticated
         if not session_manager.get("authenticated"):
-            with st.form("registration_form", border=True):
+            with st.form("registration_form", border=False):
                 st.text_input("Enter Work Email", key="email_reg", help="Current work email.")
                 st.text_input("Choose Username", key="username_reg", help="Must be unique.")
                 st.text_input("Set Password", type="password", key="password_reg", help="Make it strong!")
@@ -519,7 +532,7 @@ def render_chat_tab(rag):
         if rag:
             vs_info = rag.get_vectorstore_info()
             if vs_info["status"] != "initialized" or vs_info.get("document_count", 0) == 0:
-                st.warning("Pleas upload and process documents first in the 'Upload Documents' section.")
+                st.warning("Please upload and process documents first in the 'Upload Documents' section.")
                 return
             
     st.header("Ask Questions")
@@ -796,14 +809,31 @@ def main():
         
     st.markdown("**Get instant answers from your company documents**")
     
+    if not session_manager.get("initialized"):
+        session_manager.set("initialized", True)
+        
+        saved_token = cookies.get("session_token")
+        session_manager.set("valid_session", session_manager.validate_sessions(saved_token))
+    else:
+        saved_token = cookies.get("session_token")
+        
+    valid = session_manager.get("valid_session")
+        
+    if not valid:
+        st.toast("Session expired.")
+    else:
+        st.toast("Welcome back!")
     
-    if session_manager.get("authenticated"):
+    if session_manager.get("authenticated") or valid:
         st.toast("Logged in successfully!", icon="✅", duration="short")
         with logout_col:
             if st.button("Logout"):
                 session_manager.set("authenticated", False)
-                session_manager.clear_all()
+                session_manager.logged_out()
                 session_manager.get("conversation_manager").disconnect_user()
+                if "session_token" in cookies:
+                    del cookies["session_token"]
+                    cookies.save()
                 st.rerun()
         
         rag = initialize_rag_system()
