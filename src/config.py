@@ -10,7 +10,7 @@ USE_OLLAMA = True
 
 # Ollama Configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
 # Gemini Configuration
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -44,6 +44,7 @@ THREAD_COUNT = int(os.getenv("THREAD_COUNT", "0"))  # 0 = use all available CPU 
 
 # Vector Store Configuration
 if USE_OLLAMA:
+    # Vector Store Configuration
     VECTORSTORE_DIR = os.getenv("VECTORSTORE_DIR", "./database")
     PERSIST_DIRECTORY = os.path.join(VECTORSTORE_DIR, "vectorstore")
 else: 
@@ -51,6 +52,16 @@ else:
     PERSIST_DIRECTORY = os.path.join(VECTORSTORE_DIR, "vectorstore")
 
 # SQLite Configuration
+if USE_OLLAMA:
+    DB_PATH = "./database/structured/rag_chatbot.db"
+else:
+    DB_PATH = "./database/structured/rag_chatbot.db"
+    
+if USE_OLLAMA:
+    DB_PATH = "./database/structured/rag_chatbot.db"
+else:
+    DB_PATH = "./database/structured/rag_chatbot.db"
+    
 if USE_OLLAMA:
     DB_PATH = "./database/structured/rag_chatbot.db"
 else:
@@ -66,3 +77,39 @@ PAGE_ICON = "💼"
 
 os.environ["USER_AGENT"] = "my-rag-app/1.0"
 USER_AGENT = os.environ.get("USER_AGENT")
+
+SESSION_TIMEOUT = 60 * 60 # 1 hour
+
+FINGERPRINT_JS = """
+<script src="https://openfpcdn.io/fingerprintjs/v4"></script>
+    <script>
+    async function getFingerprint() {
+        try {
+            const fp = await FingerprintJS.load();
+            const result = await fp.get();
+            window.parent.postMessage({type: 'fingerprint', visitorId: result.visitorId}, '*');
+        } catch (error) {
+            window.parent.postMessage({type: 'fingerprint', error: error.message}, '*');
+        }
+    }
+    getFingerprint();  // Run immediately
+    </script>
+"""
+
+LISTENER_JS = """
+(function() {
+        return new Promise((resolve) => {
+            const handler = (event) => {
+                if (event.data.type === 'fingerprint') {
+                    window.removeEventListener('message', handler);
+                    resolve(event.data);
+                }
+            };
+            window.addEventListener('message', handler);
+            setTimeout(() => {
+                window.removeEventListener('message', handler);
+                resolve({error: 'timeout'});
+            }, 5000);  // 5s timeout
+        });
+    })();
+"""

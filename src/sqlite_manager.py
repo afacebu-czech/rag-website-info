@@ -1,9 +1,14 @@
 import sqlite3
 from datetime import datetime
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union, Literal
 import uuid
 import src.config as config
+# import config as config
+import bcrypt
+from src.utils.logger import AppLogger
 
+logger = AppLogger(name="sqlite_management")
 class SQLiteManager:
     """
     General-purpose SQLite manager that can:
@@ -123,6 +128,14 @@ class SQLiteManager:
                                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                                     FOREIGN KEY(conversation_id) REFERENCES conversations (id)
                                 );
+                                
+                                CREATE TABLE IF NOT EXISTS sessions (
+                                    user_id TEXT NOT NULL,
+                                    session_token TEXT PRIMARY KEY,
+                                    created_at INTEGER NOT NULL,
+                                    expires_at INTEGER NOT NULL,
+                                    FOREIGN KEY(user_id) REFERENCES users (id)
+                                )
                                 """)
             conn.commit()
             
@@ -150,8 +163,12 @@ class SQLiteManager:
         """
         query = f"DELETE FROM {table}"
         self.execute(query)
+        
+    def drop_table(self, table: str) -> None:
+        query = f"DROP TABLE {table}"
+        self.execute(query)
             
-    # --- Chat Conversation Helpers ---
+# ==================== CONVERSATION ====================
     def create_conversation(
         self,
         conversation_id: str,
@@ -202,7 +219,7 @@ class SQLiteManager:
             order_by="position ASC"
         )
         
-    def get_all_conversations_of_user(self, user_id: Optional[str] = None) -> List[Dict]:
+    def get_all_conversations_of_user(self, user_id: str = None) -> List[Dict]:
         """
         Get all conversations from SQLite with metadata.
         Each thread includes: id, title/topic, created_at, message_count.
@@ -259,14 +276,128 @@ class SQLiteManager:
                 fetch="one"
             )
             return next(iter(result.values())) if result else 0
-            
-    # --- User Helpers
+
+# ==================== USERS ====================
+    def get_user_credentials(self, username: str, password: str) -> Optional[Dict]:
+        """
+        Retrieves the user's stored hash by username and verifies the provided password using bcrypt.
+        """
+        if not username or not password:
+            return None
         
+        # Retrieve the user record, specifically the ID and the hash
+        user_record = self.select(
+            "users",
+            where="username = ?",
+            params=(username,),
+            columns="id, username, password_hash",
+            fetch="one"
+        )
+        
+        # Check if a user was found
+        if user_record:
+            stored_hash = user_record.get("password_hash")
+            
+            if isinstance(stored_hash, str):
+                stored_hash = stored_hash.encode('utf-8')
+            
+            provided_password_bytes = password.encode('utf-8')
+            
+            if bcrypt.checkpw(provided_password_bytes, stored_hash):
+                user_record.pop('password_hash', None)
+                return user_record
+            
+        return None
+    
+    def find_user(self, username: str):
+        row = self.select(
+            'users',
+            where="username = ?",
+            params=(username,),
+            columns="id, username, password_hash",
+            fetch='one'
+        )
+        if row:
+            return row
+        return None
+    
+    def create_new_user(self, email: str, username: str, hash_password: bytes) -> Optional[Dict]:
+        """
+        Hashes the password and inserts a new user record into the 'users' table.
+        Return the inserted user data (if applicable) or None on failure.
+        """
+        # Get the current timestamp (optional, but good practice for use accounts)
+        created_at = int(time.time())
+        user_id = f"USR_{uuid.uuid4().hex[:12]}"
+        
+        try:
+            self.insert(
+                "users",
+                data={
+                    "id": user_id,
+                    "username": username,
+                    "password_hash": hash_password,
+                    "email": email,
+                    "created_at": created_at
+                }
+            )
+            
+            # Return the newly created user's basic info
+            return {"id": user_id, "username": username}
+        except Exception as e:
+            print(f"Database insertion failed: {e}")
+            return None        
+        
+# ==================== SESSION ====================
+    def create_session(self, user_id: str) -> str:
+        token = str(uuid.uuid4())
+        now = int(time.time())
+        expires = now + config.SESSION_TIMEOUT
+        self.insert(
+            'sessions',
+            data={
+                'session_token': token,
+                'user_id': user_id,
+                'created_at': now,
+                'expires_at': expires
+            }
+        )
+        return token
+        
+    def update_session_expiry(self, token: str, new_expires):
+        self.update(
+            'sessions',
+            data={
+                'expires_at': new_expires
+            },
+            where='session_token = ?',
+            params=(token,)
+        )
+    
+    def find_valid_session_by_token(self, token: str) -> Dict:
+        row = self.select(
+            'sessions',
+            where="session_token = ?",
+            params=(token,),
+            columns="user_id, expires_at",
+            fetch='one'
+        )
+        return row
+        
+    def delete_session(self, token: str):
+        self.delete_row(
+            'sessions',
+            condition='session_token = ?',
+            params = (token,)
+        )
+        
+        
+# --------------- TEST ----------------
+
 def scripts():
     sql = SQLiteManager()
-
-    num_messages = sql.get_count_message_of_conversation(conversation_id="CNV_c0e80ac0b99f")
-    print(num_messages)
+    # sql.drop_table("sessions")
+    sql.delete_session("3a6ae4d6-e86f-413d-bcaf-8f0af991b0c4")
 
 def main():
     scripts()

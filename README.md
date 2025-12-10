@@ -1,10 +1,11 @@
-# Local RAG System - DeepSeek R1 8B
+# Local RAG System - Llama-3-8B
 
 A powerful Retrieval-Augmented Generation (RAG) system running locally on Windows using Ollama, DeepSeek R1 8B, and Python.
 
 ## 🎯 Overview
 
 This system allows you to:
+
 - Upload PDF documents
 - Process and chunk documents using semantic chunking
 - Create a vector database for fast retrieval
@@ -16,7 +17,7 @@ This system allows you to:
 - **Windows 10/11**
 - **Python 3.13+**
 - **Ollama** installed and running
-- **DeepSeek R1 8B** model downloaded
+- **Llama-3-8B** model downloaded
 - **Minimum 16GB RAM** (8GB for model + 8GB for system)
 
 ## 🚀 Quick Start
@@ -28,7 +29,7 @@ Download and install Ollama from [ollama.ai](https://ollama.ai)
 ### 2. Download DeepSeek R1 8B Model
 
 ```bash
-ollama pull deepseek-r1:8b
+ollama pull Llama-3-8B
 ```
 
 ### 3. Install Python Dependencies
@@ -57,8 +58,12 @@ The application will open in your browser at `http://localhost:8501`
 
 ```
 CursorProj/
-├── app.py                    # Main Streamlit application
-├── rag_system.py            # RAG core logic
+├── Chat.py                 # Main Streamlit application
+├── src
+│    └── utils
+│         ├── __init__.py
+│
+├── rag_system.py           # RAG core logic
 ├── document_processor.py   # PDF processing
 ├── config.py               # Configuration settings
 ├── requirements.txt        # Python dependencies
@@ -105,6 +110,7 @@ TEMPERATURE=0.7
 **Problem:** "Failed to initialize LLM"
 
 **Solution:**
+
 - Make sure Ollama is running: `ollama serve`
 - Verify the model is downloaded: `ollama list`
 - Check the API endpoint in `config.py`
@@ -114,6 +120,7 @@ TEMPERATURE=0.7
 **Problem:** System runs out of memory
 
 **Solution:**
+
 - Reduce `CHUNK_SIZE` in `config.py`
 - Process fewer documents at once
 - Close other applications
@@ -123,6 +130,7 @@ TEMPERATURE=0.7
 **Problem:** "Error extracting text from PDF"
 
 **Solution:**
+
 - Verify PDF is not corrupted
 - Check file size limits
 - Ensure PDF is not password-protected
@@ -165,4 +173,3 @@ This project is open source and available for educational purposes.
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-

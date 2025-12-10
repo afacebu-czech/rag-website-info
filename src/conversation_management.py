@@ -15,21 +15,16 @@ logger = AppLogger(name="conversation_manager")
 class ConversationManager:
     """Manages conversation history, caching, and threading."""
     
-    def __init__(self, cache_dir: str = "./cache", db: object=None, user_id: str=None):
+    def __init__(self, cache_dir: str = "./cache", db: object=None):
         """Initialize conversation manager."""
         self.cache_dir = cache_dir
         self.conversations_file = os.path.join(cache_dir, "conversations.json")
         self.cache_file = os.path.join(cache_dir, "question_cache.json")
         self.db = db
-        self.user_id = user_id
-        
+        self.user_id = None
+                
         # Ensure cache directory exists
         os.makedirs(cache_dir, exist_ok=True)
-        
-        # Load existing data
-        if user_id:
-            self.conversations = self.db.get_all_conversations_of_user(self.user_id)
-        self.question_cache = self._load_cache()
     
     def _load_conversations(self) -> Dict:
         """Load conversation history from file."""
@@ -75,6 +70,11 @@ class ConversationManager:
     
     def set_user(self, user_id):
         self.user_id = user_id
+        self.conversations = self.db.get_all_conversations_of_user(self.user_id)
+        
+    def disconnect_user(self):
+        self.user_id = None
+        self.conversations = None
     
     #SQLite
     def create_conversation_thread(self, conversation_id: str = None) -> str:
@@ -158,13 +158,13 @@ class ConversationManager:
         return "\n".join(context_parts)
     
     #SQLite
-    def get_all_conversations(self) -> List[Dict]:
+    def get_all_conversations(self, user_id: str) -> List[Dict]:
         """
         Get all conversation threads with metadata.
         Each thread includes: id, title/topic, created_at, message_count.
         """        
         threads = []
-        for thread_data in self.db.get_all_conversations_of_user(self.user_id):
+        for thread_data in self.db.get_all_conversations_of_user(user_id):
             topic = thread_data.get("title")
             conversation_id = thread_data.get("id")
             if not topic:

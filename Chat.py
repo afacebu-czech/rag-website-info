@@ -5,7 +5,9 @@ import streamlit as st
 import os
 import tempfile
 import uuid
+import time
 import multiprocessing
+import json
 from pathlib import Path
 from src.rag_system import RAGSystem
 from src.document_processor import DocumentProcessor
@@ -13,11 +15,19 @@ from src.conversation_management import ConversationManager
 from PIL import Image
 import src.config as config
 from src.session_management import SessionManager
-from typing import Dict
+from typing import Dict, Any
 from src.sqlite_manager import SQLiteManager
 from src.utils.logger import AppLogger
+from src.utils.helper_functions import HelperFunctions
+from streamlit_cookies_manager import EncryptedCookieManager
 
 logger = AppLogger()
+helper_functions = HelperFunctions()
+
+VALID_USERNAME = "user"
+VALID_PASSWORD = "password123"
+
+db = SQLiteManager()
 
 # Set environment variable to avoid OpenMP warning (needed for EasyOCR/numpy)
 os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
@@ -33,6 +43,9 @@ except ImportError:
     MULTIMODAL_AVAILABLE = False
     multimodal_chat_input = None
 
+
+####################################################################################################################
+
 # Page configuration
 st.set_page_config(
     page_title=config.PAGE_TITLE,
@@ -40,13 +53,91 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize sqlite db
-db = SQLiteManager()
+cookies = EncryptedCookieManager(
+    prefix="business-knowledge-assistant",
+    password="{EjNUjML)BR)^8#O"
+)
+
+if not cookies.ready():
+    st.stop()
 
 # Initialize session state
 if "session_manager" not in st.session_state:
-    st.session_state["session_manager"] = SessionManager(user_id="USR-123456")
+    st.session_state["session_manager"] = SessionManager(cookies)
 session_manager = st.session_state["session_manager"]
+
+def check_password(username, password):
+    """Simple function to check credentials."""
+    return username == VALID_USERNAME and password == VALID_PASSWORD
+
+def login():
+    """Renders the login form in the sidebar."""
+    st.header("User Login")
+    
+    if not session_manager.get("authenticated"):
+        with st.form("login_form", width=500, border=False):
+            st.text_input("Username", key="username")
+            st.text_input("Password", type="password", key="password")
+            submitted = st.form_submit_button("Login")
+            
+            if submitted:
+                status = db.get_user_credentials(username=session_manager.get("username"), password=session_manager.get("password"))
+                if status:
+                    session_manager.logged_in(status)
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+    else:
+        # Display the logout button when authenticated
+        st.write(f"Welcome, **{VALID_USERNAME}**!")
+        if st.button("Logout"):
+            session_manager.set("authenticated", False)
+            st.info("Logged out.")
+            st.rerun()
+            
+def register():
+    """Renders the user registration form."""
+    with st.expander("No account yet?", expanded=False):
+        st.header("User Registration")
+        # Only show the registration form if the user is NOT authenticated
+        if not session_manager.get("authenticated"):
+            with st.form("registration_form", border=False):
+                st.text_input("Enter Work Email", key="email_reg", help="Current work email.")
+                st.text_input("Choose Username", key="username_reg", help="Must be unique.")
+                st.text_input("Set Password", type="password", key="password_reg", help="Make it strong!")
+                submitted = st.form_submit_button("Register Account", type="primary")
+
+                if submitted:
+                    # 1. Retrieve the input values
+                    username = session_manager.get("username_reg")
+                    password = session_manager.get("password_reg")
+                    email = session_manager.get("email_reg")
+                    
+                    # 2. Basic Input Validation
+                    if not username or not password or not email:
+                        st.error("Please enter a username, an email and a password.")
+                        return
+
+                    # 3. Attempt to register the new user
+                    result = db.create_new_user(email=email, username=username, password=password)
+
+                    if result:
+                        st.success(f"Account for **{username}** created successfully! You can now log in.")
+                        
+                        # Optional: Automatically log the user in after successful registration
+                        session_manager.set("authenticated", True)
+                        session_manager.set("user_id", result.get("id"))
+                        session_manager.set("current_user", result.get("username"))
+                        st.rerun() 
+                        
+                    else:
+                        # Registration failed (e.g., username already exists)
+                        st.error(f"Registration failed: {result}")
+        else:
+            # Display message if already logged in
+            current_user = session_manager.get("current_user", "User")
+            st.info(f"You are already logged in as **{current_user}**. Please log out before registering a new account.")
+    
 
 def initialize_rag_system():
     """Initialize the RAG system."""
@@ -362,7 +453,7 @@ def render_sidebar():
             st.rerun()
             
         st.subheader("Conversation Threads")
-        threads = session_manager.get("conversation_manager").get_all_conversations()
+        threads = session_manager.get("conversation_manager").get_all_conversations(session_manager.get("user_id"))
         if threads:
             thread_options = {}
             for t in threads:
@@ -428,9 +519,10 @@ def render_document_tab():
 
 def display_chat_messages(messages):
     """Displays all messages in the chat history."""
-    for message in messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    if messages:
+        for message in messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
         
 def render_chat_tab(rag):
     """Renders the Chat Interface tab UI, including the history, and handles input/processing."""
@@ -440,7 +532,7 @@ def render_chat_tab(rag):
         if rag:
             vs_info = rag.get_vectorstore_info()
             if vs_info["status"] != "initialized" or vs_info.get("document_count", 0) == 0:
-                st.warning("Pleas upload and process documents first in the 'Upload Documents' section.")
+                st.warning("Please upload and process documents first in the 'Upload Documents' section.")
                 return
             
     st.header("Ask Questions")
@@ -451,7 +543,7 @@ def render_chat_tab(rag):
     with col1:
         thread_topic = "New conversation"
         if session_manager.get("current_thread_id"):
-            threads = session_manager.get("conversation_manager").get_all_conversations()
+            threads = session_manager.get("conversation_manager").get_all_conversations(session_manager.get("user_id"))
             for t in threads:
                 if t['thread_id'] == session_manager.get("current_thread_id"):
                     thread_topic = t.get('topic', 'Current conversation')
@@ -711,21 +803,57 @@ def display_suggestions(current_suggestions, rag):
     
 def main():
     """Main application function."""
-    st.title("💼 Business Knowledge Assistant")
+    title_col, logout_col = st.columns([16, 1])
+    with title_col:
+        st.title("💼 Business Knowledge Assistant")
+        
     st.markdown("**Get instant answers from your company documents**")
-    rag = initialize_rag_system()
     
-    # Sidebar rendering
-    render_sidebar()
+    if not session_manager.get("initialized"):
+        session_manager.set("initialized", True)
+        
+        saved_token = cookies.get("session_token")
+        session_manager.set("valid_session", session_manager.validate_sessions(saved_token))
+    else:
+        saved_token = cookies.get("session_token")
+        
+    valid = session_manager.get("valid_session")
+        
+    if not valid:
+        st.toast("Session expired.")
+    else:
+        st.toast("Welcome back!")
     
-    # Main content tabs (Rendered consistently to avoid recreation issue)
-    tab1, tab2 = st.tabs(["Upload Documents", "Chat with Documents"])
-    
-    with tab1:
-        render_document_tab()
-    
-    with tab2:
-        render_chat_tab(rag)
+    if session_manager.get("authenticated") or valid:
+        st.toast("Logged in successfully!", icon="✅", duration="short")
+        with logout_col:
+            if st.button("Logout"):
+                session_manager.set("authenticated", False)
+                session_manager.logged_out()
+                session_manager.get("conversation_manager").disconnect_user()
+                if "session_token" in cookies:
+                    del cookies["session_token"]
+                    cookies.save()
+                st.rerun()
+        
+        rag = initialize_rag_system()
+        # Sidebar rendering
+        render_sidebar()
+        
+        # Main content tabs (Rendered consistently to avoid recreation issue)
+        tab1, tab2 = st.tabs(["Upload Documents", "Chat with Documents"])
+        
+        with tab1:
+            render_document_tab()
+        
+        with tab2:
+            render_chat_tab(rag)
+    else:
+        login_col, register_col = st.columns([2, 2])
+        with login_col:
+            login()
+        with register_col:
+            register()
 
 if __name__ == "__main__":
     main()
