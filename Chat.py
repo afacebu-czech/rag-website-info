@@ -819,6 +819,11 @@ def main():
         
     valid = session_manager.get("valid_session")
         
+        
+    print("hello")
+    print("erica, aubry")
+    
+    
     if not valid:
         st.toast("Session expired.")
     else:

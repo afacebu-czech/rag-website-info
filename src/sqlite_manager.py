@@ -21,6 +21,7 @@ class SQLiteManager:
         self.db_path = db_path
         self._init_default_schema()
         
+    print("aubry was here")
     # --- Core Connection Utilities ---
     def _connect(self):
         """Create and return a SQLite connection."""
